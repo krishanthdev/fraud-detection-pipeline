@@ -25,6 +25,9 @@ STAGE_COMMANDS = [
     "run-all",
 ]
 
+#: Stages that still print which branch they arrive on.
+UNBUILT_COMMANDS = ["features", "train", "evaluate", "register", "serve"]
+
 
 def test_help_lists_every_stage() -> None:
     result = runner.invoke(app, ["--help"])
@@ -57,7 +60,34 @@ def test_bad_override_fails_with_a_non_zero_exit() -> None:
 
 
 def test_unimplemented_stages_exit_with_code_two() -> None:
-    for command in STAGE_COMMANDS:
+    for command in UNBUILT_COMMANDS:
         result = runner.invoke(app, [command])
         assert result.exit_code == 2, f"{command} should report that it is not built yet"
         assert "not implemented yet" in result.output
+
+
+def test_ingest_without_data_fails_with_a_useful_message(tmp_path) -> None:
+    """Exit code 1 is a real failure, as opposed to code 2 for a stage that does not exist."""
+    result = runner.invoke(
+        app, ["--set", f"paths.data_raw={(tmp_path / 'empty').as_posix()}", "ingest"]
+    )
+
+    assert result.exit_code == 1
+    assert "Ingest failed" in result.output
+    assert "kaggle.com" in result.output
+
+
+def test_validate_without_an_ingest_fails_cleanly(tmp_path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--set",
+            f"paths.data_raw={(tmp_path / 'empty').as_posix()}",
+            "--set",
+            f"paths.data_interim={(tmp_path / 'empty').as_posix()}",
+            "validate",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "fraud ingest" in result.output
