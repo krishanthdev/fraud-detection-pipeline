@@ -4,9 +4,8 @@ An end to end credit card fraud detection system. It goes from a raw transaction
 trained and registered model, a scoring API, and a dashboard that explains why a
 transaction was flagged. Everything runs from the command line and inside Docker.
 
-> **Status: in progress.** The scaffold, config system and CLI are done. The pipeline
-> stages are being added one branch at a time. See the branch plan in
-> [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Status: in progress.** Stages 1 and 2 run on the real data. Stages 3 to 8 are being
+> added one branch at a time. See the branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The problem
 
@@ -41,19 +40,50 @@ The data is never committed. See [data/raw/README.md](data/raw/README.md) for ho
 Eight stages, each one a command. The real pipeline lives in `src/`. Notebooks are for
 exploring only.
 
-| Stage | Command | What it does |
-| --- | --- | --- |
-| 1. Ingest | `make ingest` | Read the raw file, type it, write an interim table |
-| 2. Validate | `make validate` | Schema and quality rules. Stops the run if the data is wrong |
-| 3. Features | `make features` | Build features and write the train, validation and test sets |
-| 4. Train | `make train` | Fit every model under every imbalance strategy |
-| 5. Evaluate | `make evaluate` | Metrics, threshold tuning, SHAP, results table |
-| 6. Register | `make register` | Log to MLflow and promote a champion model |
-| 7. Serve | `make serve` and `make app` | FastAPI endpoint and Streamlit dashboard |
-| 8. Package | `make docker-up` | The whole thing in containers |
+| Stage | Command | What it does | Status |
+| --- | --- | --- | --- |
+| 1. Ingest | `make ingest` | Read the raw file, type it, write an interim table | done |
+| 2. Validate | `make validate` | Quality rules and the split. Stops the run if the data is wrong | done |
+| 3. Features | `make features` | Build features from the split that already exists | next |
+| 4. Train | `make train` | Fit every model under every imbalance strategy | |
+| 5. Evaluate | `make evaluate` | Metrics, threshold tuning, SHAP, results table | |
+| 6. Register | `make register` | Log to MLflow and promote a champion model | |
+| 7. Serve | `make serve` and `make app` | FastAPI endpoint and Streamlit dashboard | |
+| 8. Package | `make docker-up` | The whole thing in containers | |
 
 `make all` runs stages 1 to 6 in order. On Windows use `.\tasks.ps1 all` instead, since
 Windows does not ship `make`.
+
+### Data quality and the split
+
+Stage 2 runs ten named checks before anything is trained, and writes
+[reports/tables/validation_report.md](reports/tables/validation_report.md). Two of them
+found something worth knowing about this dataset.
+
+**There are 1,081 exact duplicate rows**, 19 of them fraud. With 28 continuous components
+matching to full precision, these are double entries rather than coincidence. They are
+dropped, which leaves 283,726 rows. They do not leak across the split, because copies share
+a timestamp and land in the same block, but keeping them would let a model count the same
+transaction twice.
+
+**The split is by time, not at random.** A real system always scores transactions made
+after the ones it learned from, and fraud patterns drift. A random split quietly lets the
+model learn from the future and reports a score the deployed system would never reach.
+
+| Split | Rows | Fraud rows | Fraud rate |
+| --- | --- | --- | --- |
+| Train | 198,608 | 366 | 0.184 percent |
+| Validation | 42,558 | 55 | 0.129 percent |
+| Test | 42,560 | 52 | 0.122 percent |
+
+That fraud rate is not flat. The training window has about 50 percent more fraud per
+transaction than the test window does. This is exactly the drift a random split would have
+hidden, and it means the model is graded on a period that does not look like the one it
+learned from. That is the honest setup.
+
+It also sets a limit on how much the results can be trusted: with 52 fraud cases in the
+test set, one extra catch moves recall by about two points. The results table reports that
+uncertainty rather than quoting four decimal places as if they were solid.
 
 ## Results
 
