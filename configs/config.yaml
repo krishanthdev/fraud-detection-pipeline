@@ -1,0 +1,145 @@
+# Central configuration for the fraud detection pipeline.
+# Every stage reads this file. Nothing important is hard coded in Python.
+# Override any value on the command line, for example:
+#   fraud train --set training.seed=7
+
+project:
+  name: fraud-detection-pipeline
+  # One seed for numpy, python, scikit learn and torch. Changing it changes every result.
+  seed: 42
+
+paths:
+  # All paths are relative to the repository root unless they start with a drive or a slash.
+  data_raw: data/raw
+  data_interim: data/interim
+  data_processed: data/processed
+  models: models
+  reports: reports
+  figures: reports/figures
+  tables: reports/tables
+
+dataset:
+  # Which dataset the pipeline is currently pointed at.
+  # "ulb" is the Kaggle Credit Card Fraud set. "ieee" is the IEEE CIS set, added later.
+  active: ulb
+
+  ulb:
+    name: Credit Card Fraud Detection (ULB)
+    source_url: https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
+    # Put the downloaded file here. The ingest stage looks for it before anything else.
+    raw_file: creditcard.csv
+    target_column: Class
+    # Column holding seconds elapsed since the first transaction in the file.
+    time_column: Time
+    amount_column: Amount
+    # The 28 anonymised principal components.
+    pca_columns_prefix: V
+    pca_columns_count: 28
+    expected_rows: 284807
+    expected_fraud_rows: 492
+
+split:
+  # The ULB data is one continuous time window, so we split by time to avoid leaking
+  # the future into the past. Fractions are of the full row count, in time order.
+  strategy: time
+  train_fraction: 0.70
+  validation_fraction: 0.15
+  test_fraction: 0.15
+  # A stratified random split is kept as a comparison option.
+  fallback_strategy: stratified
+
+validation:
+  # Hard rules. If any of these fail the pipeline stops before training.
+  max_missing_fraction: 0.0
+  min_rows: 100000
+  allowed_target_values: [0, 1]
+  max_fraud_rate: 0.01
+  min_fraud_rate: 0.0005
+  amount_min: 0.0
+  fail_on_duplicate_rows: false
+
+features:
+  amount_log: true          # log1p of the amount, because amounts are heavily skewed
+  amount_zscore: true       # amount z score, fitted on train only
+  hour_of_day: true         # derived from the seconds column
+  time_since_last: true     # seconds since the previous transaction
+  rolling_windows: [10, 50] # rolling mean and standard deviation of amount, in transactions
+  scale_pca_columns: false  # V1 to V28 are already centred by the original PCA
+
+imbalance:
+  # Each model is trained under each of these settings so the results table can show
+  # what imbalance handling is actually worth.
+  strategies: [none, class_weight, smote]
+  smote:
+    sampling_strategy: 0.1   # bring the minority class up to 10 percent of the majority
+    k_neighbors: 5
+
+models:
+  logistic_regression:
+    enabled: true
+    max_iter: 2000
+    C: 1.0
+    solver: liblinear
+  random_forest:
+    enabled: true
+    n_estimators: 300
+    max_depth: 12
+    min_samples_leaf: 5
+    n_jobs: -1
+  xgboost:
+    enabled: true
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    tree_method: hist
+  lightgbm:
+    enabled: true
+    n_estimators: 400
+    num_leaves: 31
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+  neural_net:
+    enabled: true
+    hidden_sizes: [64, 32]
+    dropout: 0.3
+    learning_rate: 0.001
+    batch_size: 512
+    epochs: 30
+    early_stopping_patience: 5
+
+evaluation:
+  # Accuracy is deliberately absent. On a 0.17 percent positive rate it is meaningless.
+  primary_metric: average_precision   # this is PR AUC
+  report_metrics: [precision, recall, f1, average_precision, roc_auc, brier_score]
+  # The operating threshold is picked on validation, then applied unchanged to test.
+  threshold_strategy: cost            # options: cost, max_f1, fixed_recall
+  fixed_recall_target: 0.80
+  cost:
+    # A missed fraud costs the average fraudulent amount. A false alarm costs the
+    # support and churn expense of blocking a real customer. Both are editable.
+    false_negative_cost: 120.0
+    false_positive_cost: 5.0
+
+explainability:
+  shap_enabled: true
+  shap_background_samples: 200
+  shap_top_features: 10
+
+registry:
+  # MLflow tracking. A local sqlite store by default, so nothing external is needed.
+  tracking_uri: sqlite:///mlflow.db
+  experiment_name: fraud-detection
+  registered_model_name: fraud-detector
+  # A challenger is promoted to champion only if it beats the champion by this much.
+  promotion_metric: average_precision
+  promotion_min_improvement: 0.005
+
+serving:
+  api_host: 0.0.0.0
+  api_port: 8000
+  streamlit_port: 8501
+  # The app calls the API at this address. Docker compose overrides it with the service name.
+  api_base_url: http://localhost:8000
