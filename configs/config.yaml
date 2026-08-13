@@ -38,6 +38,17 @@ dataset:
     expected_rows: 284807
     expected_fraud_rows: 492
 
+ingest:
+  # Parquet, not csv. It loads about ten times faster and it keeps the dtypes, so no stage
+  # after this one has to guess what a column is.
+  interim_file: transactions.parquet
+  manifest_file: ingest_manifest.json
+  # Hash the raw file and record it in the manifest, so any result can be traced back to
+  # the exact input file that produced it.
+  checksum: true
+  # Reading in chunks keeps the peak memory low. Set to 0 to read the file in one go.
+  chunk_size: 100000
+
 split:
   # The ULB data is one continuous time window, so we split by time to avoid leaking
   # the future into the past. Fractions are of the full row count, in time order.
@@ -47,6 +58,8 @@ split:
   test_fraction: 0.15
   # A stratified random split is kept as a comparison option.
   fallback_strategy: stratified
+  # Where the split files are written, inside data/interim.
+  output_dir: splits
 
 validation:
   # Hard rules. If any of these fail the pipeline stops before training.
@@ -56,7 +69,14 @@ validation:
   max_fraud_rate: 0.01
   min_fraud_rate: 0.0005
   amount_min: 0.0
+  # The ULB file holds 1081 exact duplicate rows. They do not leak across the time split,
+  # because copies share a timestamp and land in the same block, but they do let the model
+  # count the same transaction twice. They are dropped and the count is reported.
   fail_on_duplicate_rows: false
+  drop_duplicates: true
+  # A split needs enough fraud rows for precision and recall to mean anything.
+  min_fraud_rows_per_split: 30
+  report_file: validation_report.md
 
 features:
   amount_log: true          # log1p of the amount, because amounts are heavily skewed
