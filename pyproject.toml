@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fraud-pipeline"
+version = "0.1.0"
+description = "End to end credit card fraud detection pipeline: ingest, validate, features, train, evaluate, register, serve, package."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Newton Krishanth Dev", email = "krishanthdev.kd@gmail.com" }]
+keywords = ["fraud detection", "imbalanced classification", "mlops", "mlflow"]
+
+[project.scripts]
+fraud = "fraud_pipeline.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "app"]
+exclude = [".venv", "notebooks", "data", "models", "mlruns"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "PTH",  # use pathlib
+    "RET",  # return statements
+    "ARG",  # unused arguments
+]
+ignore = [
+    "E501",  # line length is handled by the formatter
+    "B008",  # typer uses function calls in argument defaults by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers --cov=fraud_pipeline --cov-report=term-missing"
+markers = [
+    "slow: tests that train a model or read the full dataset",
+    "needs_data: tests that require the real dataset in data/raw",
+]
+
+[tool.coverage.run]
+source = ["src/fraud_pipeline"]
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
