@@ -1,0 +1,44 @@
+# Runtime dependencies for the fraud detection pipeline.
+# Pinned to minor versions so a rebuild months from now still reproduces the results table.
+# Python 3.12 is the supported interpreter.
+
+# Core data stack
+numpy==2.1.3
+pandas==2.2.3
+pyarrow==18.1.0
+scipy==1.14.1
+
+# Configuration and validation
+pyyaml==6.0.2
+pydantic==2.10.4
+
+# Classical machine learning
+scikit-learn==1.5.2
+imbalanced-learn==0.12.4
+xgboost==2.1.3
+lightgbm==4.5.0
+
+# Neural network
+torch==2.5.1
+
+# Explainability
+shap==0.46.0
+
+# Experiment tracking and model registry
+mlflow==2.19.0
+
+# Serving
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+streamlit==1.41.1
+requests==2.32.3
+
+# Plotting
+matplotlib==3.9.3
+seaborn==0.13.2
+
+# Command line output
+# typer 0.15 breaks against click 8.2 and later, so both are pinned together.
+typer==0.27.1
+click==8.4.2
+rich==13.9.4
