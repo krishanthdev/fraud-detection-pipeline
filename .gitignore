@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing and linting caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data. Nothing raw or derived is ever committed.
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+!data/**/.gitkeep
+!data/**/README.md
+
+# Model artifacts. Tracked in MLflow, not in git.
+models/*
+!models/.gitkeep
+
+# MLflow local store
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Generated reports. Figures used by the README are force added on purpose.
+reports/tables/*
+!reports/tables/.gitkeep
+reports/*.log
+
+# Secrets
+.env
+*.env
+!.env.example
+kaggle.json
+.kaggle/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
