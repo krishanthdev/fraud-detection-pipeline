@@ -26,8 +26,14 @@ from rich.console import Console
 from rich.table import Table
 
 from fraud_pipeline import __version__
+from fraud_pipeline import ingest as ingest_stage
+from fraud_pipeline import validation as validation_stage
 from fraud_pipeline.config import Config, load_config
-from fraud_pipeline.logging_utils import setup_logging
+from fraud_pipeline.ingest import IngestError
+from fraud_pipeline.logging_utils import setup_logging, stage_banner
+from fraud_pipeline.seeding import set_global_seed
+from fraud_pipeline.splits import SplitError
+from fraud_pipeline.validation import ValidationError
 
 console = Console()
 
@@ -124,18 +130,52 @@ def show_config(ctx: typer.Context) -> None:
     console.print(table)
 
 
+def _do_ingest(rc: RunContext) -> None:
+    """Stage 1, shared by the `ingest` command and by `run-all`."""
+    stage_banner(rc.logger, "1 ingest", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        manifest = ingest_stage.run(rc.config)
+    except IngestError as error:
+        console.print(f"[red]Ingest failed.[/red]\n{error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(
+        f"[green]Ingested[/green] {manifest.rows:,} rows, "
+        f"{manifest.fraud_rows} fraud ({manifest.fraud_rate * 100:.3f} percent)."
+    )
+
+
+def _do_validate(rc: RunContext) -> None:
+    """Stage 2, shared by the `validate` command and by `run-all`."""
+    stage_banner(rc.logger, "2 validate", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        report = validation_stage.run(rc.config)
+    except (IngestError, SplitError) as error:
+        console.print(f"[red]Validation could not run.[/red]\n{error}")
+        raise typer.Exit(code=1) from error
+    except ValidationError as error:
+        console.print(f"[red]Validation failed.[/red]\n{error}")
+        raise typer.Exit(code=1) from error
+
+    warned = len(report.warnings)
+    tail = f", {warned} warning(s)" if warned else ""
+    console.print(f"[green]Validation passed[/green] with {len(report.results)} checks{tail}.")
+
+
 @app.command()
 def ingest(ctx: typer.Context) -> None:
     """Stage 1. Read the raw transaction file and write a typed interim table."""
-    _context(ctx)
-    _not_built_yet("ingest", "feature/data-ingest-validate")
+    _do_ingest(_context(ctx))
 
 
 @app.command()
 def validate(ctx: typer.Context) -> None:
-    """Stage 2. Check the schema and the data quality rules before anything is trained."""
-    _context(ctx)
-    _not_built_yet("validate", "feature/data-ingest-validate")
+    """Stage 2. Check the schema and the data quality rules, then split the data."""
+    _do_validate(_context(ctx))
 
 
 @app.command()
@@ -176,8 +216,10 @@ def serve(ctx: typer.Context) -> None:
 @app.command("run-all")
 def run_all(ctx: typer.Context) -> None:
     """Run stages 1 to 6 in order, which is what the Makefile target `make all` calls."""
-    _context(ctx)
-    _not_built_yet("run-all", "feature/evaluation-and-results-table")
+    rc = _context(ctx)
+    _do_ingest(rc)
+    _do_validate(rc)
+    _not_built_yet("features", "feature/feature-engineering")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -99,12 +99,20 @@ class DatasetConfig(StrictModel):
         return getattr(self, self.active)
 
 
+class IngestConfig(StrictModel):
+    interim_file: str
+    manifest_file: str
+    checksum: bool = True
+    chunk_size: int = 0
+
+
 class SplitConfig(StrictModel):
     strategy: str
     train_fraction: float
     validation_fraction: float
     test_fraction: float
     fallback_strategy: str = "stratified"
+    output_dir: str = "splits"
 
     @field_validator("strategy", "fallback_strategy")
     @classmethod
@@ -130,6 +138,9 @@ class ValidationConfig(StrictModel):
     min_fraud_rate: float
     amount_min: float
     fail_on_duplicate_rows: bool = False
+    drop_duplicates: bool = True
+    min_fraud_rows_per_split: int = 30
+    report_file: str = "validation_report.md"
 
 
 class FeaturesConfig(StrictModel):
@@ -220,6 +231,7 @@ class Config(StrictModel):
     project: ProjectConfig
     paths: PathsConfig
     dataset: DatasetConfig
+    ingest: IngestConfig
     split: SplitConfig
     validation: ValidationConfig
     features: FeaturesConfig

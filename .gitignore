@@ -56,6 +56,9 @@ mlflow.db
 # Generated reports. Figures used by the README are force added on purpose.
 reports/tables/*
 !reports/tables/.gitkeep
+# The validation report is committed deliberately. It is small, and it is the record of
+# what the data looked like on the run that produced the results.
+!reports/tables/validation_report.md
 reports/*.log
 
 # Secrets
