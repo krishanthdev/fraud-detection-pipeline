@@ -143,6 +143,62 @@ class ValidationConfig(StrictModel):
     report_file: str = "validation_report.md"
 
 
+class EdaConfig(StrictModel):
+    analysis_split: str = "train"
+    drift_split: str = "validation"
+    figures: bool = True
+    figure_dpi: int = 120
+    mutual_info_sample: int = 50000
+    permutation_shuffles: int = 40
+    permutation_quantile: float = 0.95
+    correlation_report_top: int = 15
+    distribution_plot_features: int = 6
+    report_file: str = "eda_report.md"
+    stats_file: str = "feature_stats.csv"
+
+    @field_validator("analysis_split", "drift_split")
+    @classmethod
+    def _never_the_test_split(cls, value: str) -> str:
+        """Guard the one rule that matters here.
+
+        Pointing exploration at the test split would quietly invalidate every number the
+        project later reports, and it is an easy edit to make by accident.
+        """
+        if value == "test":
+            raise ValueError(
+                "eda must never read the test split. Choosing features by looking at test "
+                "data makes the final metrics meaningless."
+            )
+        if value not in {"train", "validation"}:
+            raise ValueError(f"eda split must be train or validation, got {value!r}")
+        return value
+
+
+class FeatureSelectionConfig(StrictModel):
+    enabled: bool = True
+    output_file: str = "selected_features.json"
+    report_file: str = "feature_selection.md"
+    active_set: str = "selected"
+
+    leakage_auc: float = 0.99
+    duplicate_correlation: float = 0.95
+    dominant_value_share: float = 0.995
+    min_range_coverage: float = 0.95
+
+    drop_low_signal: bool = True
+    psi_warn: float = 0.25
+
+    keep_as_input: list[str] = Field(default_factory=list)
+
+    @field_validator("active_set")
+    @classmethod
+    def _known_set(cls, value: str) -> str:
+        allowed = {"all", "safe", "selected"}
+        if value not in allowed:
+            raise ValueError(f"active_set must be one of {sorted(allowed)}, got {value!r}")
+        return value
+
+
 class FeaturesConfig(StrictModel):
     amount_log: bool
     amount_zscore: bool
@@ -234,6 +290,8 @@ class Config(StrictModel):
     ingest: IngestConfig
     split: SplitConfig
     validation: ValidationConfig
+    eda: EdaConfig
+    feature_selection: FeatureSelectionConfig
     features: FeaturesConfig
     imbalance: ImbalanceConfig
     models: dict[str, ModelSpec] = Field(default_factory=dict)

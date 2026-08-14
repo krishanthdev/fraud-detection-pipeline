@@ -78,6 +78,65 @@ validation:
   min_fraud_rows_per_split: 30
   report_file: validation_report.md
 
+eda:
+  # Exploration runs on the training split. The test split is never read, not even to draw
+  # a picture, so nothing about it can leak into a modelling decision. Drift is measured
+  # against validation, which is the most recent data we are allowed to look at.
+  analysis_split: train
+  drift_split: validation
+  figures: true
+  figure_dpi: 120
+  # Mutual information uses a k nearest neighbour estimator, which is slow on 200,000
+  # rows. It runs on a fixed random subsample instead. Set to 0 to use every row.
+  mutual_info_sample: 50000
+  # The noise ceiling is found by shuffling the target and recording the best univariate
+  # AUC that any feature reaches by chance. This is what makes "weak" a measured word
+  # rather than a guess. See reports/tables/eda_report.md for the number it produced.
+  permutation_shuffles: 40
+  permutation_quantile: 0.95
+  correlation_report_top: 15
+  distribution_plot_features: 6
+  report_file: eda_report.md
+  stats_file: feature_stats.csv
+
+feature_selection:
+  enabled: true
+  output_file: selected_features.json
+  report_file: feature_selection.md
+  # Which set the later stages use: all, safe, or selected.
+  #   all       every feature, no selection at all
+  #   safe      tier 1 only, the drops that are correctness problems
+  #   selected  tier 1 plus tier 2, which also drops features indistinguishable from noise
+  active_set: selected
+
+  # --- Tier 1. Correctness problems. Always applied. ---
+  # A feature that separates the classes this well on its own is almost certainly a leak,
+  # not a discovery. Nothing in this dataset comes close, which is itself worth reporting.
+  leakage_auc: 0.99
+  # Two features correlated above this carry the same information. One of them goes.
+  duplicate_correlation: 0.95
+  # A feature where one value covers this share of rows carries almost nothing.
+  dominant_value_share: 0.995
+  # The share of validation values that must fall inside the training range. A feature
+  # that fails this cannot generalise, because production values will sit outside
+  # anything the model was fitted on. Raw Time fails it with 0.0 percent overlap.
+  min_range_coverage: 0.95
+
+  # --- Tier 2. A judgement call, not a correctness problem. ---
+  # Univariate screening cannot see interactions, and tree models tolerate useless
+  # features well, so this is the rule most worth arguing about. It is measured against
+  # the permutation noise ceiling rather than a round number picked by hand.
+  drop_low_signal: true
+
+  # Reported, never acted on. A shifted feature can still be a useful one, and dropping
+  # every feature that moved would leave very little behind.
+  psi_warn: 0.25
+
+  # Kept in the data files whatever the rules decide, because stage 3 derives features
+  # from them. Being a pipeline input is not the same as being a model feature: Time is
+  # dropped as a feature and kept as an input, so hour of day can be built from it.
+  keep_as_input: [Time, Amount]
+
 features:
   amount_log: true          # log1p of the amount, because amounts are heavily skewed
   amount_zscore: true       # amount z score, fitted on train only
