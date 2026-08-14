@@ -4,6 +4,7 @@ One command per pipeline stage, in the order the stages run:
 
     fraud ingest      stage 1
     fraud validate    stage 2
+    fraud eda         exploration and feature selection
     fraud features    stage 3
     fraud train       stage 4
     fraud evaluate    stage 5
@@ -26,9 +27,12 @@ from rich.console import Console
 from rich.table import Table
 
 from fraud_pipeline import __version__
+from fraud_pipeline import eda as eda_stage
 from fraud_pipeline import ingest as ingest_stage
 from fraud_pipeline import validation as validation_stage
 from fraud_pipeline.config import Config, load_config
+from fraud_pipeline.eda import EdaError
+from fraud_pipeline.feature_selection import SelectionError
 from fraud_pipeline.ingest import IngestError
 from fraud_pipeline.logging_utils import setup_logging, stage_banner
 from fraud_pipeline.seeding import set_global_seed
@@ -178,6 +182,45 @@ def validate(ctx: typer.Context) -> None:
     _do_validate(_context(ctx))
 
 
+def _do_eda(rc: RunContext) -> None:
+    """Exploration and feature selection, shared by the `eda` command and by `run-all`."""
+    stage_banner(rc.logger, "eda", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        stats, selection = eda_stage.run(rc.config)
+    except (SplitError, EdaError, SelectionError) as error:
+        console.print(f"[red]Exploration failed.[/red]\n{error}")
+        raise typer.Exit(code=1) from error
+
+    counts = selection.counts()
+    table = Table(title="Feature selection", show_lines=False)
+    table.add_column("Set", style="cyan")
+    table.add_column("Features", justify="right")
+    table.add_column("Meaning", style="white")
+    table.add_row("all", str(counts["all"]), "no selection")
+    table.add_row("safe", str(counts["safe"]), "tier 1, the correctness drops")
+    table.add_row("selected", str(counts["selected"]), "tier 1 and tier 2")
+    console.print(table)
+
+    dropped = selection.dropped()
+    if dropped:
+        console.print(f"[yellow]Dropped from '{selection.active_set}':[/yellow]")
+        for decision in dropped:
+            console.print(f"  {decision.feature}: {decision.reasons[0]}")
+
+    console.print(
+        f"[green]Analysed[/green] {len(stats)} features. "
+        f"Active set '{selection.active_set}' keeps {counts[selection.active_set]}."
+    )
+
+
+@app.command()
+def eda(ctx: typer.Context) -> None:
+    """Explore the training split, then choose features from what it finds."""
+    _do_eda(_context(ctx))
+
+
 @app.command()
 def features(ctx: typer.Context) -> None:
     """Stage 3. Build model ready features and write the train, validation and test sets."""
@@ -219,6 +262,7 @@ def run_all(ctx: typer.Context) -> None:
     rc = _context(ctx)
     _do_ingest(rc)
     _do_validate(rc)
+    _do_eda(rc)
     _not_built_yet("features", "feature/feature-engineering")
 
 

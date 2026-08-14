@@ -59,6 +59,13 @@ markers = [
     "slow: tests that train a model or read the full dataset",
     "needs_data: tests that require the real dataset in data/raw",
 ]
+filterwarnings = [
+    # Matplotlib's font and maths text handling calls pyparsing APIs that pyparsing has
+    # deprecated. It is third party, there is nothing to fix on our side, and it fires on
+    # every figure, which buries any warning that does matter. Narrowed to pyparsing's own
+    # warning class so nothing else is hidden.
+    "ignore::pyparsing.exceptions.PyparsingDeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["src/fraud_pipeline"]
