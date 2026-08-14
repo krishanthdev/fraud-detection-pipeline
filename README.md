@@ -4,8 +4,9 @@ An end to end credit card fraud detection system. It goes from a raw transaction
 trained and registered model, a scoring API, and a dashboard that explains why a
 transaction was flagged. Everything runs from the command line and inside Docker.
 
-> **Status: in progress.** Stages 1 and 2 run on the real data. Stages 3 to 8 are being
-> added one branch at a time. See the branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Status: in progress.** Stages 1 and 2 plus the exploratory analysis and automatic
+> feature selection run on the real data. Stages 3 to 8 are being added one branch at a
+> time. See the branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The problem
 
@@ -44,6 +45,7 @@ exploring only.
 | --- | --- | --- | --- |
 | 1. Ingest | `make ingest` | Read the raw file, type it, write an interim table | done |
 | 2. Validate | `make validate` | Quality rules and the split. Stops the run if the data is wrong | done |
+| . EDA | `make eda` | Measure every feature, then select automatically from what it finds | done |
 | 3. Features | `make features` | Build features from the split that already exists | next |
 | 4. Train | `make train` | Fit every model under every imbalance strategy | |
 | 5. Evaluate | `make evaluate` | Metrics, threshold tuning, SHAP, results table | |
@@ -76,14 +78,112 @@ model learn from the future and reports a score the deployed system would never 
 | Validation | 42,558 | 55 | 0.129 percent |
 | Test | 42,560 | 52 | 0.122 percent |
 
-That fraud rate is not flat. The training window has about 50 percent more fraud per
-transaction than the test window does. This is exactly the drift a random split would have
-hidden, and it means the model is graded on a period that does not look like the one it
-learned from. That is the honest setup.
+That fraud rate is not flat across the three parts, and the reason turned out to be more
+interesting than plain drift. See the next section.
 
 It also sets a limit on how much the results can be trusted: with 52 fraud cases in the
 test set, one extra catch moves recall by about two points. The results table reports that
 uncertainty rather than quoting four decimal places as if they were solid.
+
+## What the exploration found
+
+`make eda` measures every feature on the training split, then selects features from what it
+measures. It never reads the test split, and the config refuses to let it. Full output in
+[reports/tables/eda_report.md](reports/tables/eda_report.md).
+
+### Fraud follows the clock, not just the calendar
+
+![fraud by hour](reports/figures/07_fraud_by_hour.png)
+
+Fraud is **5.1 times more likely between 01:00 and 05:00** (0.742 percent) than during the
+rest of the day (0.145 percent), and those hours are exactly when transaction volume is at
+its lowest.
+
+This changes how the split table above should be read. Validation covers only 12:52 to
+18:03 on the clock, so it contains none of the high fraud window. Restricting training to
+that same clock window drops its fraud rate from 0.184 to 0.156 percent, close to
+validation's 0.129. **Most of the gap between the splits is which hours they contain, not
+fraud behaviour changing over the two days.**
+
+It also means the chronological split has a real limitation on this dataset. The file is
+only 48 hours long, so no single split can cover a full daily cycle, and neither validation
+nor test contains the small hours. The IEEE CIS dataset spans months and will not have this
+problem.
+
+### How much signal is real
+
+![univariate ranking](reports/figures/04_univariate_ranking.png)
+
+The threshold here is measured, not chosen. Shuffling the target 40 times and recording the
+best AUC any of the 30 features still reached by chance gives an average of 0.535 and a peak
+of 0.557. So on this dataset, with only 366 fraud rows in training, **a feature carrying no
+information at all can still score about 0.55.** Anything below that is indistinguishable
+from a column of random numbers.
+
+Taking the maximum across all features on each shuffle is the point. Testing 30 features and
+keeping the best is 30 chances to be fooled, and the maximum statistic accounts for that.
+
+### No leakage, no duplicates
+
+Nothing reaches the 0.99 AUC leakage threshold. No two features are correlated above 0.95,
+and the strongest pair anywhere is V2 with Amount at 0.55.
+
+Both are the expected answers rather than lucky ones. V1 to V28 are principal components, so
+they are orthogonal to each other by construction, and no original column survives that
+could encode the answer. The checks still run on every pipeline run, because the IEEE CIS
+dataset has real named columns where a leak is a genuine possibility.
+
+## Automatic feature selection
+
+The selection system applies rules with measured thresholds and records the evidence behind
+every drop. Output in
+[reports/tables/feature_selection.md](reports/tables/feature_selection.md).
+
+Rules come in two tiers, and the split between them matters.
+
+**Tier 1 is correctness.** Leakage, duplicates, constant columns, and features whose next
+period values fall outside the training range. Keeping any of these is a mistake rather than
+a preference.
+
+**Tier 2 is judgement.** Dropping features with no measurable signal. This is arguable,
+because univariate screening cannot see interactions, so it is separated out and can be
+switched off.
+
+That produces three feature sets, and the pipeline can train on any of them:
+
+| Set | Features | What it is |
+| --- | --- | --- |
+| `all` | 30 | no selection, the honest baseline |
+| `safe` | 29 | tier 1 only |
+| `selected` | 26 | tier 1 and tier 2 |
+
+Whether selection actually helps is a question for the results table, not an assumption.
+
+### What got dropped, and why
+
+| Feature | Tier | Reason |
+| --- | --- | --- |
+| `Time` | 1 | 0.00 percent of validation values fall inside the training range |
+| `V22` | 2 | AUC 0.528 and KS 0.080, both below the noise ceilings |
+| `V26` | 2 | AUC 0.527 and KS 0.086, both below the noise ceilings |
+| `V13` | 2 | AUC 0.505 and KS 0.083, both below the noise ceilings |
+
+`Time` is the interesting one. It only ever increases, so every future value is larger than
+anything the model trained on and the model is being asked to extrapolate past the edge of
+its experience. A shifted distribution is survivable. No overlap at all is not. It stays in
+the data as a pipeline input, because hour of day gets derived from it, and hour of day both
+carries more signal (0.61 AUC against 0.58) and covers the range completely.
+
+### A feature has to fail two tests, not one
+
+Four features sit below the AUC ceiling and are still kept: `Amount`, `V23`, `V15` and
+`V25`. They survive because AUC only sees whether fraud sits consistently high or low, and
+they separate the classes without doing that.
+
+`Amount` is the clearest case. It scores 0.548 AUC, below the ceiling, while its KS distance
+is 0.260, nearly three times the KS ceiling. Fraudulent amounts really are distributed
+differently, they are just not consistently larger or smaller. An AUC only version of this
+rule dropped `Amount`, and that was wrong.
 
 ## Results
 

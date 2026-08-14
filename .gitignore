@@ -53,12 +53,16 @@ mlruns/
 mlartifacts/
 mlflow.db
 
-# Generated reports. Figures used by the README are force added on purpose.
+# Generated reports. Figures are committed, because the README shows them.
 reports/tables/*
 !reports/tables/.gitkeep
-# The validation report is committed deliberately. It is small, and it is the record of
-# what the data looked like on the run that produced the results.
+# These are committed deliberately. They are small, they change only when the data or the
+# rules change, and they are the record of what was true on the run that produced the
+# results. A reader should be able to see them without downloading 144 MB first.
 !reports/tables/validation_report.md
+!reports/tables/eda_report.md
+!reports/tables/feature_selection.md
+!reports/tables/feature_stats.csv
 reports/*.log
 
 # Secrets
