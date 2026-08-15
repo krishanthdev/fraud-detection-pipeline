@@ -63,6 +63,8 @@ reports/tables/*
 !reports/tables/eda_report.md
 !reports/tables/feature_selection.md
 !reports/tables/feature_stats.csv
+!reports/tables/feature_engineering.md
+!reports/tables/engineered_feature_stats.csv
 reports/*.log
 
 # Secrets
