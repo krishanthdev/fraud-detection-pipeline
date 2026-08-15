@@ -28,11 +28,13 @@ from rich.table import Table
 
 from fraud_pipeline import __version__
 from fraud_pipeline import eda as eda_stage
+from fraud_pipeline import features as features_stage
 from fraud_pipeline import ingest as ingest_stage
 from fraud_pipeline import validation as validation_stage
 from fraud_pipeline.config import Config, load_config
 from fraud_pipeline.eda import EdaError
 from fraud_pipeline.feature_selection import SelectionError
+from fraud_pipeline.features import FeatureError
 from fraud_pipeline.ingest import IngestError
 from fraud_pipeline.logging_utils import setup_logging, stage_banner
 from fraud_pipeline.seeding import set_global_seed
@@ -221,11 +223,34 @@ def eda(ctx: typer.Context) -> None:
     _do_eda(_context(ctx))
 
 
+def _do_features(rc: RunContext) -> None:
+    """Stage 3, shared by the `features` command and by `run-all`."""
+    stage_banner(rc.logger, "3 features", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        fitted, selection = features_stage.run(rc.config)
+    except (SplitError, FeatureError, EdaError, SelectionError) as error:
+        console.print(f"[red]Feature building failed.[/red]\n{error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(
+        f"[green]Built[/green] {len(fitted.built)} new features, "
+        f"carried {len(fitted.passthrough)} through, {len(fitted.feature_names)} in total."
+    )
+    if selection is not None:
+        counts = selection.counts()
+        kept_new = [n for n in selection.features() if n in set(fitted.built)]
+        console.print(
+            f"Selection keeps {counts[selection.active_set]} of {counts['all']}, "
+            f"including {len(kept_new)} of the {len(fitted.built)} new ones."
+        )
+
+
 @app.command()
 def features(ctx: typer.Context) -> None:
     """Stage 3. Build model ready features and write the train, validation and test sets."""
-    _context(ctx)
-    _not_built_yet("features", "feature/feature-engineering")
+    _do_features(_context(ctx))
 
 
 @app.command()
@@ -263,7 +288,8 @@ def run_all(ctx: typer.Context) -> None:
     _do_ingest(rc)
     _do_validate(rc)
     _do_eda(rc)
-    _not_built_yet("features", "feature/feature-engineering")
+    _do_features(rc)
+    _not_built_yet("train", "feature/baseline-models")
 
 
 if __name__ == "__main__":  # pragma: no cover
