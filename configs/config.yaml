@@ -138,12 +138,37 @@ feature_selection:
   keep_as_input: [Time, Amount]
 
 features:
+  # Where the model ready tables are written, inside data/processed.
+  output_dir: engineered
+  stats_file: feature_stats_fitted.json
+  report_file: feature_engineering.md
+
+  # --- Pointwise transforms, computed from a single row ---
   amount_log: true          # log1p of the amount, because amounts are heavily skewed
-  amount_zscore: true       # amount z score, fitted on train only
-  hour_of_day: true         # derived from the seconds column
+  hour_of_day: true         # hour, plus a sine and cosine pair so 23:00 and 00:00 are close
+
+  # --- History features, computed from earlier transactions only ---
+  # These look backwards and never forwards, which is what makes them safe to compute
+  # across the whole ordered stream. A row using earlier rows is exactly what a deployed
+  # system does.
   time_since_last: true     # seconds since the previous transaction
-  rolling_windows: [10, 50] # rolling mean and standard deviation of amount, in transactions
+  rolling_windows: [10, 50] # how many prior transactions each baseline covers
+  amount_deviation: true    # how unusual this amount is against the recent baseline
+  transaction_rate: true    # how busy the stream has been recently
+
+  # No global standardisation happens here, on purpose.
+  #
+  # A z score against the training mean is a monotonic transform of the amount, so it
+  # carries exactly the same information for a tree model and would show up as a perfect
+  # duplicate. Linear models and the neural net do need it, so it belongs inside their own
+  # pipelines in stage 4, fitted on the training fold. Putting it here would either
+  # duplicate a column or quietly scale data the tree models never asked to have scaled.
   scale_pca_columns: false  # V1 to V28 are already centred by the original PCA
+
+  # Run the selection rules again over the engineered features. The raw pass in the eda
+  # stage judged the columns the file arrived with. This judges the columns the model will
+  # actually see, which is the set that matters.
+  reselect: true
 
 imbalance:
   # Each model is trained under each of these settings so the results table can show

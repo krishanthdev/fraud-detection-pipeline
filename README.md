@@ -46,8 +46,8 @@ exploring only.
 | 1. Ingest | `make ingest` | Read the raw file, type it, write an interim table | done |
 | 2. Validate | `make validate` | Quality rules and the split. Stops the run if the data is wrong | done |
 | . EDA | `make eda` | Measure every feature, then select automatically from what it finds | done |
-| 3. Features | `make features` | Build features from the split that already exists | next |
-| 4. Train | `make train` | Fit every model under every imbalance strategy | |
+| 3. Features | `make features` | Build features, then reselect over the engineered set | done |
+| 4. Train | `make train` | Fit every model under every imbalance strategy | next |
 | 5. Evaluate | `make evaluate` | Metrics, threshold tuning, SHAP, results table | |
 | 6. Register | `make register` | Log to MLflow and promote a champion model | |
 | 7. Serve | `make serve` and `make app` | FastAPI endpoint and Streamlit dashboard | |
@@ -184,6 +184,70 @@ they separate the classes without doing that.
 is 0.260, nearly three times the KS ceiling. Fraudulent amounts really are distributed
 differently, they are just not consistently larger or smaller. An AUC only version of this
 rule dropped `Amount`, and that was wrong.
+
+## Feature engineering
+
+`make features` builds 15 new features from `Time` and `Amount`, carries the 28 components
+and `Amount` through unchanged, and then runs the same selection rules again over the
+engineered set. Full output in
+[reports/tables/feature_engineering.md](reports/tables/feature_engineering.md).
+
+The brief also asks for rolling aggregates per card and category encodings. Neither is
+possible on this dataset, and it is better to say so than to skip it quietly: ULB contains
+`Time`, `V1` to `V28`, `Amount` and `Class`, and nothing identifies a cardholder. The same
+ideas are applied to the global transaction stream instead. Per card versions arrive with
+IEEE CIS.
+
+### Two rules that pull in opposite directions
+
+**A feature may look backwards, never forwards.** A rolling average over the previous 50
+transactions is exactly what a deployed system has at scoring time, so these are computed
+across the whole ordered stream including split boundaries. Building them inside each split
+separately would be worse, because validation would start from a cold baseline that
+production never has.
+
+**A fitted statistic may only come from training.** Means, standard deviations, quantiles.
+These summarise the data they are fitted on, so fitting one on everything folds the future
+into every row.
+
+Only two numbers are fitted here, both used to fill the gap at the very start of the stream
+where a history feature has no history yet. Everything else is pointwise or built from a
+row's own past, which is why there is so little to fit.
+
+### Which new features earned their place
+
+10 of 15 survived selection. The pattern is consistent and makes sense.
+
+| Kept | AUC | | Dropped | AUC |
+| --- | --- | --- | --- | --- |
+| `txn_rate_10` | 0.626 | | `amount_roll_mean_10` | 0.504 |
+| `txn_rate_50` | 0.622 | | `amount_roll_std_10` | 0.510 |
+| `hour` | 0.610 | | `amount_dev_10` | 0.508 |
+| `hour_sin` | 0.593 | | `amount_roll_mean_50` | 0.533 |
+| `seconds_since_prev` | 0.586 | | `amount_roll_std_50` | 0.536 |
+
+**The raw baselines were dropped and the comparisons were kept.** `amount_roll_mean_10`
+describes the recent stream, not the transaction being scored, so it carries almost nothing
+on its own. `amount_ratio_10`, which compares this amount against that baseline, scores
+0.554 with a KS of 0.222. The useful feature was never the baseline, it was the distance
+from it.
+
+**The time features are the strongest thing built.** `txn_rate_10` at 0.626 beats every
+engineered feature and beats raw `Time` at 0.584, which is the feature it effectively
+replaces. That follows directly from the EDA finding: fraud concentrates in the small hours,
+and those are exactly the hours when the stream is quiet.
+
+### A caveat on the time features
+
+`hour` has a PSI of 8.99 and `txn_rate_10` a PSI of 1.21, the two largest in the set. That
+is not drift in the usual sense, it is the 48 hour window problem again: training covers a
+full daily cycle and validation covers only 12:52 to 18:03.
+
+So the strongest new features are also the ones validation is least able to check. They stay
+in, because their range coverage is complete and dropping the best signal to avoid an
+awkward validation set would be the wrong trade. It does mean the validation score will
+understate how much these features are worth, and it is a reason to treat the eventual
+train to validation gap with some suspicion rather than as pure overfitting.
 
 ## Results
 
