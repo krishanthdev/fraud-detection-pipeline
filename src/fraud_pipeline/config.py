@@ -200,12 +200,27 @@ class FeatureSelectionConfig(StrictModel):
 
 
 class FeaturesConfig(StrictModel):
-    amount_log: bool
-    amount_zscore: bool
-    hour_of_day: bool
-    time_since_last: bool
-    rolling_windows: list[int]
-    scale_pca_columns: bool
+    output_dir: str = "engineered"
+    stats_file: str = "feature_stats_fitted.json"
+    report_file: str = "feature_engineering.md"
+
+    amount_log: bool = True
+    hour_of_day: bool = True
+
+    time_since_last: bool = True
+    rolling_windows: list[int] = Field(default_factory=lambda: [10, 50])
+    amount_deviation: bool = True
+    transaction_rate: bool = True
+
+    scale_pca_columns: bool = False
+    reselect: bool = True
+
+    @field_validator("rolling_windows")
+    @classmethod
+    def _windows_are_usable(cls, value: list[int]) -> list[int]:
+        if any(window < 2 for window in value):
+            raise ValueError(f"rolling windows must be at least 2, got {value}")
+        return sorted(set(value))
 
 
 class SmoteConfig(StrictModel):
