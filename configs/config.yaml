@@ -198,6 +198,16 @@ training:
   # a couple of points between two models may be nothing at all, and a single number would
   # invite reading it as though it were solid.
   bootstrap_samples: 500
+
+  # A trained model that emits fewer than this many distinct scores across the whole
+  # evaluation split has effectively stopped splitting, and its metrics describe an artifact
+  # rather than a model. This is a warning, not a failure, because the run is still evidence
+  # about that configuration.
+  #
+  # The number is empirical, from this dataset. Healthy runs produced between 489 and 971
+  # distinct scores. Collapsed ones produced 110 or fewer, and in the worst case 2. There is
+  # a wide gap between those, and 200 sits in it.
+  min_distinct_scores: 200
   bootstrap_confidence: 0.95
 
 models:
@@ -226,7 +236,23 @@ models:
     num_leaves: 31
     learning_rate: 0.05
     subsample: 0.8
+    # Without this, `subsample` above is silently ignored. LightGBM only bags every
+    # `subsample_freq` iterations and the default is 0, meaning never. The setting was in
+    # this config for a full sweep doing nothing at all: runs with and without `subsample`
+    # produced byte identical scores.
+    subsample_freq: 1
     colsample_bytree: 0.8
+    # min_child_samples is deliberately left at its default of 20.
+    #
+    # Lowering it to 10 was tried, to stop the unweighted runs collapsing. It did stop that,
+    # and it destroyed the two runs that already worked: LightGBM with class weights fell from
+    # 0.857 to 0.014 and started emitting three distinct scores across the whole split. The
+    # combination of a small leaf floor and a class weight of 540 is what breaks it, and
+    # testing the two separately hid that.
+    #
+    # The unweighted collapse is not a bug to tune away. It is the finding: LightGBM needs
+    # imbalance handling on this data, where random forest merely benefits from it. The
+    # collapse detector reports those runs rather than hiding them.
   neural_net:
     enabled: true
     hidden_sizes: [64, 32]

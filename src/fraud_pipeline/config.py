@@ -290,6 +290,7 @@ class TrainingConfig(StrictModel):
     results_file: str = "baseline_results.md"
     results_csv: str = "baseline_results.csv"
     bootstrap_samples: int = 500
+    min_distinct_scores: int = 200
     bootstrap_confidence: float = 0.95
 
     @field_validator("eval_split")

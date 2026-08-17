@@ -71,7 +71,15 @@ class RunResult:
     eval_rows: int
     eval_positives: int
     run_name: str
+    #: How many different values the model emitted. A health check, not a quality metric.
+    distinct_scores: int = 0
+    #: Set when the run looks degenerate, so the results table can say so out loud.
+    warning: str = ""
     mlflow_run_id: str | None = None
+
+    @property
+    def looks_degenerate(self) -> bool:
+        return bool(self.warning)
 
     @property
     def interval(self) -> metrics.Interval:
@@ -91,7 +99,18 @@ class TrainingReport:
     skipped: list[str] = field(default_factory=list)
 
     def best(self) -> RunResult:
-        return max(self.results, key=lambda r: r.average_precision)
+        """The highest scoring run that is not degenerate.
+
+        A collapsed model cannot win by accident. Its metrics are an artifact, so letting one
+        top the table would be worse than not reporting it at all. If every run is degenerate
+        the best of a bad set is still returned, because at that point the whole sweep is the
+        finding and hiding it helps nobody.
+        """
+        healthy = [r for r in self.results if not r.looks_degenerate]
+        return max(healthy or self.results, key=lambda r: r.average_precision)
+
+    def degenerate(self) -> list[RunResult]:
+        return [r for r in self.results if r.looks_degenerate]
 
     def ranked(self) -> list[RunResult]:
         return sorted(self.results, key=lambda r: r.average_precision, reverse=True)
@@ -110,6 +129,7 @@ class TrainingReport:
             run
             for run in self.results
             if run.run_name != best.run_name
+            and not run.looks_degenerate
             and metrics.intervals_overlap(run.interval, best.interval)
         ]
 
@@ -257,7 +277,10 @@ def fit_one(
     x_eval, y_eval = _feature_matrix(evaluation, feature_names, target)
 
     params = config.models[definition.name].params()
-    pipeline = models.build_pipeline(definition, params, strategy, config)
+    # Computed from the training labels rather than guessed, and only actually used by models
+    # whose weighting is scale_pos_weight. On this data it comes out around 540.
+    pos_weight = models.positive_class_weight(y_train)
+    pipeline = models.build_pipeline(definition, params, strategy, config, pos_weight=pos_weight)
     run_name = models.describe(definition, strategy, feature_set)
 
     started = time.perf_counter()
@@ -304,7 +327,17 @@ def fit_one(
         eval_rows=scores.rows,
         eval_positives=scores.positives,
         run_name=run_name,
+        distinct_scores=scores.distinct_scores,
     )
+
+    minimum = config.training.min_distinct_scores
+    if scores.distinct_scores < minimum:
+        result.warning = (
+            f"only {scores.distinct_scores} distinct scores across {scores.rows:,} rows "
+            f"(below {minimum}), so most rows are tied and the ranking is largely arbitrary. "
+            f"Treat this row as evidence the configuration is wrong, not as a measurement."
+        )
+        logger.warning("%s: %s", run_name, result.warning)
 
     return result, pipeline, predictions
 
@@ -496,6 +529,8 @@ def _build_results_markdown(report: TrainingReport, config: Config) -> str:
         set_label = run.feature_set
         if run.feature_set_aliases:
             set_label = f"{run.feature_set} = {run.feature_set_aliases}"
+        if run.looks_degenerate:
+            set_label = f"{set_label} **[1]**"
         lines.append(
             f"| {run.label} | {run.imbalance} | {set_label} ({run.n_features}) | "
             f"{run.average_precision:.4f} | "
@@ -520,6 +555,30 @@ def _build_results_markdown(report: TrainingReport, config: Config) -> str:
         f"a gap of {best.overfit_gap:+.4f}",
         "",
     ]
+
+    degenerate = report.degenerate()
+    if degenerate:
+        lines += [
+            "## [1] Runs that produced a collapsed model",
+            "",
+            f"{len(degenerate)} run(s) emitted fewer than "
+            f"{config.training.min_distinct_scores} distinct scores across "
+            f"{best.eval_rows:,} rows. A model that has stopped splitting still returns valid "
+            "probabilities and still produces a plausible looking ROC AUC, but almost every "
+            "row is tied, so the ranking behind those numbers is largely arbitrary.",
+            "",
+            "They are shown for completeness and excluded from the comparison. Read them as "
+            "evidence that the configuration is wrong, not as measurements of it.",
+            "",
+            "| Run | Distinct scores | PR AUC |",
+            "| --- | --- | --- |",
+        ]
+        lines += [
+            f"| {r.label}, {r.imbalance}, {r.feature_set} | {r.distinct_scores} | "
+            f"{r.average_precision:.4f} |"
+            for r in degenerate
+        ]
+        lines.append("")
 
     if tied:
         lines += [
