@@ -281,7 +281,49 @@ class ExplainabilityConfig(StrictModel):
     shap_top_features: int
 
 
+class TrainingConfig(StrictModel):
+    feature_sets: list[str] = Field(default_factory=lambda: ["selected"])
+    eval_split: str = "validation"
+    predictions_dir: str = "predictions"
+    models_dir: str = "baselines"
+    save_models: bool = True
+    results_file: str = "baseline_results.md"
+    results_csv: str = "baseline_results.csv"
+    bootstrap_samples: int = 500
+    bootstrap_confidence: float = 0.95
+
+    @field_validator("eval_split")
+    @classmethod
+    def _never_score_on_test(cls, value: str) -> str:
+        """The test split does not get opened during training.
+
+        Comparing models on test, then reporting test numbers, means the held out set has
+        already shaped every choice by the time it is used to judge them. Stage 5 opens it
+        once, after the threshold is fixed.
+        """
+        if value == "test":
+            raise ValueError(
+                "training must not score on the test split. Models are compared on "
+                "validation, and stage 5 opens test once at the end."
+            )
+        if value not in {"train", "validation"}:
+            raise ValueError(f"eval_split must be train or validation, got {value!r}")
+        return value
+
+    @field_validator("feature_sets")
+    @classmethod
+    def _known_feature_sets(cls, value: list[str]) -> list[str]:
+        allowed = {"all", "safe", "selected"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"unknown feature sets: {sorted(unknown)}")
+        if not value:
+            raise ValueError("at least one feature set is needed")
+        return value
+
+
 class RegistryConfig(StrictModel):
+    enabled: bool = True
     tracking_uri: str
     experiment_name: str
     registered_model_name: str
@@ -309,6 +351,7 @@ class Config(StrictModel):
     feature_selection: FeatureSelectionConfig
     features: FeaturesConfig
     imbalance: ImbalanceConfig
+    training: TrainingConfig
     models: dict[str, ModelSpec] = Field(default_factory=dict)
     evaluation: EvaluationConfig
     explainability: ExplainabilityConfig
