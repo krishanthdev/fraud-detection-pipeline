@@ -30,6 +30,7 @@ from fraud_pipeline import __version__
 from fraud_pipeline import eda as eda_stage
 from fraud_pipeline import features as features_stage
 from fraud_pipeline import ingest as ingest_stage
+from fraud_pipeline import train as train_stage
 from fraud_pipeline import validation as validation_stage
 from fraud_pipeline.config import Config, load_config
 from fraud_pipeline.eda import EdaError
@@ -37,8 +38,11 @@ from fraud_pipeline.feature_selection import SelectionError
 from fraud_pipeline.features import FeatureError
 from fraud_pipeline.ingest import IngestError
 from fraud_pipeline.logging_utils import setup_logging, stage_banner
+from fraud_pipeline.metrics import MetricError
+from fraud_pipeline.models import ModelError
 from fraud_pipeline.seeding import set_global_seed
 from fraud_pipeline.splits import SplitError
+from fraud_pipeline.train import TrainingError
 from fraud_pipeline.validation import ValidationError
 
 console = Console()
@@ -253,11 +257,52 @@ def features(ctx: typer.Context) -> None:
     _do_features(_context(ctx))
 
 
+def _do_train(rc: RunContext) -> None:
+    """Stage 4, shared by the `train` command and by `run-all`."""
+    stage_banner(rc.logger, "4 train", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        report = train_stage.run(rc.config)
+    except (FeatureError, SelectionError, TrainingError, ModelError, MetricError) as error:
+        console.print(f"[red]Training failed.[/red]\n{error}")
+        raise typer.Exit(code=1) from error
+
+    train_stage.write_json_summary(report, rc.config)
+    best = report.best()
+
+    table = Table(title=f"Top runs on {rc.config.training.eval_split}", show_lines=False)
+    table.add_column("Model", style="cyan")
+    table.add_column("Imbalance")
+    table.add_column("Features")
+    table.add_column("PR AUC", justify="right")
+    table.add_column("95% interval")
+    for run in report.ranked()[:6]:
+        table.add_row(
+            run.label,
+            run.imbalance,
+            f"{run.feature_set} ({run.n_features})",
+            f"{run.average_precision:.4f}",
+            f"[{run.ap_low:.3f}, {run.ap_high:.3f}]",
+        )
+    console.print(table)
+
+    tied = report.indistinguishable_from_best()
+    console.print(
+        f"[green]Best[/green] {best.label} / {best.imbalance} / {best.feature_set}: "
+        f"PR AUC {best.average_precision:.4f}."
+    )
+    if tied:
+        console.print(
+            f"[yellow]{len(tied)} other run(s) cannot be told apart from it[/yellow], "
+            f"their intervals overlap. Only {best.eval_positives} fraud cases to judge on."
+        )
+
+
 @app.command()
 def train(ctx: typer.Context) -> None:
     """Stage 4. Fit every enabled model under every imbalance strategy."""
-    _context(ctx)
-    _not_built_yet("train", "feature/baseline-models")
+    _do_train(_context(ctx))
 
 
 @app.command()
@@ -289,7 +334,8 @@ def run_all(ctx: typer.Context) -> None:
     _do_validate(rc)
     _do_eda(rc)
     _do_features(rc)
-    _not_built_yet("train", "feature/baseline-models")
+    _do_train(rc)
+    _not_built_yet("evaluate", "feature/evaluation-and-results-table")
 
 
 if __name__ == "__main__":  # pragma: no cover
