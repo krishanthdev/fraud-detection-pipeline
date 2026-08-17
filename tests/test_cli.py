@@ -27,7 +27,7 @@ STAGE_COMMANDS = [
 ]
 
 #: Stages that still print which branch they arrive on.
-UNBUILT_COMMANDS = ["train", "evaluate", "register", "serve"]
+UNBUILT_COMMANDS = ["evaluate", "register", "serve"]
 
 
 def test_help_lists_every_stage() -> None:

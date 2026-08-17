@@ -73,6 +73,10 @@ _DENOMINATOR_FLOOR = 1.0
 SECONDS_PER_HOUR = 3600.0
 HOURS_PER_DAY = 24.0
 
+#: Marks the selection pass this stage runs, so it does not overwrite the raw pass from the
+#: eda stage. Stage 4 trains on the engineered set, so it reads this tag.
+ENGINEERED_TAG = "engineered"
+
 
 class FeatureError(RuntimeError):
     """The feature stage cannot build a usable table."""
@@ -441,7 +445,8 @@ def _reselect(
     report_path.write_text(_build_report(stats, selection, fitted), encoding="utf-8")
     logger.info("wrote %s", report_path.name)
 
-    feature_selection.write_selection(selection, stats, config)
+    # Tagged, so this does not overwrite the raw pass the eda stage wrote.
+    feature_selection.write_selection(selection, stats, config, tag=ENGINEERED_TAG)
     return selection
 
 

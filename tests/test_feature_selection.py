@@ -277,6 +277,44 @@ def test_loading_before_the_stage_has_run_explains_itself(selection_config) -> N
         feature_selection.load_selection(selection_config)
 
 
+def test_a_tagged_load_points_at_the_right_stage(selection_config) -> None:
+    """The engineered pass comes from the features stage, so the message should say so."""
+    with pytest.raises(SelectionError, match="fraud features"):
+        feature_selection.load_selection(selection_config, tag="engineered")
+
+
+def test_tagged_names_keep_the_extension() -> None:
+    assert feature_selection.tagged_name("selected_features.json", None) == "selected_features.json"
+    assert (
+        feature_selection.tagged_name("selected_features.json", "engineered")
+        == "selected_features_engineered.json"
+    )
+    assert (
+        feature_selection.tagged_name("feature_selection.md", "engineered")
+        == "feature_selection_engineered.md"
+    )
+
+
+def test_the_two_selection_passes_do_not_overwrite_each_other(selection_config) -> None:
+    """The wart this tag exists to fix.
+
+    Selection runs twice, once over the raw columns and once over the engineered ones. Both
+    used to write the same filename, so the committed report described a different run than
+    the one it came from.
+    """
+    result, stats, _ = _run_selection(selection_config)
+
+    raw_json, raw_report = feature_selection.write_selection(result, stats, selection_config)
+    engineered_json, engineered_report = feature_selection.write_selection(
+        result, stats, selection_config, tag="engineered"
+    )
+
+    assert raw_json != engineered_json
+    assert raw_report != engineered_report
+    for path in (raw_json, raw_report, engineered_json, engineered_report):
+        assert Path(path).is_file()
+
+
 def test_loading_an_unknown_set_from_disk_is_rejected(selection_config) -> None:
     result, stats, _ = _run_selection(selection_config)
     feature_selection.write_selection(result, stats, selection_config)

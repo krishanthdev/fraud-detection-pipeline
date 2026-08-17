@@ -178,6 +178,28 @@ imbalance:
     sampling_strategy: 0.1   # bring the minority class up to 10 percent of the majority
     k_neighbors: 5
 
+training:
+  # Which feature sets to train on. Running all three is what turns "does feature selection
+  # help" from an assumption into a row in the results table.
+  feature_sets: [all, safe, selected]
+
+  # Models are compared on validation. The test split stays closed until stage 5, so that
+  # when it is finally opened it is still a genuine held out set and not somewhere every
+  # decision has already been rehearsed.
+  eval_split: validation
+
+  predictions_dir: predictions
+  models_dir: baselines
+  save_models: true
+  results_file: baseline_results.md
+  results_csv: baseline_results.csv
+
+  # A bootstrap interval on the primary metric. Validation holds 55 fraud cases, so a gap of
+  # a couple of points between two models may be nothing at all, and a single number would
+  # invite reading it as though it were solid.
+  bootstrap_samples: 500
+  bootstrap_confidence: 0.95
+
 models:
   logistic_regression:
     enabled: true
@@ -234,6 +256,7 @@ explainability:
 
 registry:
   # MLflow tracking. A local sqlite store by default, so nothing external is needed.
+  enabled: true
   tracking_uri: sqlite:///mlflow.db
   experiment_name: fraud-detection
   registered_model_name: fraud-detector

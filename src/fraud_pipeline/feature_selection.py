@@ -458,34 +458,56 @@ def select_features(
     return result
 
 
+def tagged_name(filename: str, tag: str | None) -> str:
+    """Insert a tag before the extension, so two passes do not overwrite each other.
+
+    Selection runs twice: once in the eda stage over the columns the file arrived with, and
+    again in the feature stage over the engineered columns the model will actually see. Both
+    are worth keeping. Sharing one filename meant the second pass silently replaced the
+    first, so the committed report no longer matched the run it described.
+    """
+    if not tag:
+        return filename
+    stem, _, extension = filename.rpartition(".")
+    return f"{stem}_{tag}.{extension}" if stem else f"{filename}_{tag}"
+
+
 def write_selection(
-    result: SelectionResult, stats: pd.DataFrame, config: Config
+    result: SelectionResult, stats: pd.DataFrame, config: Config, tag: str | None = None
 ) -> tuple[str, str]:
     """Write the machine readable json and the human readable markdown."""
     from fraud_pipeline.paths import ensure_dir
 
-    json_path = ensure_dir(config.paths.interim()) / config.feature_selection.output_file
+    json_path = ensure_dir(config.paths.interim()) / tagged_name(
+        config.feature_selection.output_file, tag
+    )
     json_path.write_text(result.to_json(), encoding="utf-8")
 
-    report_path = ensure_dir(config.paths.tables_dir()) / config.feature_selection.report_file
+    report_path = ensure_dir(config.paths.tables_dir()) / tagged_name(
+        config.feature_selection.report_file, tag
+    )
     report_path.write_text(result.to_markdown(stats), encoding="utf-8")
 
     return str(json_path), str(report_path)
 
 
-def load_selection(config: Config) -> dict[str, Any]:
-    """Read the selection back. Stage 3 and everything after it uses this."""
-    path = config.paths.interim() / config.feature_selection.output_file
+def load_selection(config: Config, tag: str | None = None) -> dict[str, Any]:
+    """Read a selection back. Stage 3 and everything after it uses this."""
+    path = config.paths.interim() / tagged_name(config.feature_selection.output_file, tag)
+
     if not path.is_file():
+        stage = "features" if tag else "eda"
         raise SelectionError(
-            f"feature selection not found: {path}\nRun the eda stage first: fraud eda"
+            f"feature selection not found: {path}\nRun the {stage} stage first: fraud {stage}"
         )
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_selected_features(config: Config, set_name: str | None = None) -> list[str]:
+def load_selected_features(
+    config: Config, set_name: str | None = None, tag: str | None = None
+) -> list[str]:
     """The feature names a later stage should train on."""
-    payload = load_selection(config)
+    payload = load_selection(config, tag)
     chosen = set_name or payload.get("active_set", "selected")
     if chosen not in payload["sets"]:
         raise SelectionError(f"unknown feature set {chosen!r}, expected one of {SET_NAMES}")

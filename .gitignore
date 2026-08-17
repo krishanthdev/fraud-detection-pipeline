@@ -65,6 +65,10 @@ reports/tables/*
 !reports/tables/feature_stats.csv
 !reports/tables/feature_engineering.md
 !reports/tables/engineered_feature_stats.csv
+!reports/tables/feature_selection_engineered.md
+!reports/tables/baseline_results.md
+!reports/tables/baseline_results.csv
+!reports/tables/baseline_summary.json
 reports/*.log
 
 # Secrets
