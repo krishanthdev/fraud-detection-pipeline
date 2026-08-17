@@ -34,25 +34,137 @@ def _imbalanced_data(rows: int = 800, positives: int = 30, seed: int = 0):
     return x, y
 
 
+def _tiny_params(name: str) -> dict:
+    """Enough of each model to build, small enough that a test fits in a second."""
+    return {
+        "logistic_regression": {"max_iter": 50},
+        "random_forest": {"n_estimators": 5},
+        "xgboost": {"n_estimators": 5},
+        "lightgbm": {"n_estimators": 5},
+        "neural_net": {"hidden_sizes": [8], "epochs": 2, "early_stopping_patience": 0},
+    }[name]
+
+
 # --------------------------------------------------------------------------------------
 # The registry
 # --------------------------------------------------------------------------------------
 
 
-def test_the_baselines_are_registered(model_config) -> None:
+def test_every_configured_model_is_now_implemented(model_config) -> None:
+    """The PLANNED mechanism is empty, so nothing in the config gets silently skipped."""
+    from fraud_pipeline import models as models_module
+
+    assert models_module.PLANNED == {}
+    assert set(models.available_models(model_config)) == set(model_config.enabled_models())
+
+
+def test_all_five_models_are_registered(model_config) -> None:
     available = models.available_models(model_config)
 
-    assert "logistic_regression" in available
-    assert "random_forest" in available
+    assert set(available) == {
+        "logistic_regression",
+        "random_forest",
+        "xgboost",
+        "lightgbm",
+        "neural_net",
+    }
 
 
-def test_unimplemented_models_are_skipped_not_failed(model_config) -> None:
-    """XGBoost and friends are enabled in the config but arrive on a later branch."""
+def test_only_the_network_and_the_linear_model_need_scaling(model_config) -> None:
+    """Trees split on order, so scaling them is wasted work with no effect on the result."""
+    scaled = {name: d.needs_scaling for name, d in models.available_models(model_config).items()}
+
+    assert scaled["logistic_regression"] is True
+    assert scaled["neural_net"] is True
+    assert scaled["random_forest"] is False
+    assert scaled["xgboost"] is False
+    assert scaled["lightgbm"] is False
+
+
+# --------------------------------------------------------------------------------------
+# The two routes to weighting the rare class
+# --------------------------------------------------------------------------------------
+
+
+def test_xgboost_weights_through_scale_pos_weight(model_config) -> None:
+    """The one model without scikit learn's class_weight keyword."""
+    definition = models.REGISTRY["xgboost"]
+    assert definition.weighting == "scale_pos_weight"
+
+    pipeline = models.build_pipeline(
+        definition, {"n_estimators": 5}, "class_weight", model_config, pos_weight=99.0
+    )
+
+    assert pipeline.named_steps["model"].get_params()["scale_pos_weight"] == 99.0
+
+
+def test_the_others_weight_through_the_class_weight_keyword(model_config) -> None:
+    for name in ("logistic_regression", "random_forest", "lightgbm", "neural_net"):
+        definition = models.REGISTRY[name]
+        assert definition.weighting == "class_weight", name
+
+        pipeline = models.build_pipeline(
+            definition, _tiny_params(name), "class_weight", model_config, pos_weight=99.0
+        )
+        assert pipeline.named_steps["model"].get_params()["class_weight"] == "balanced", name
+
+
+def test_xgboost_refuses_to_guess_a_missing_weight(model_config) -> None:
+    """Silently training unweighted would look like a working run and quietly change it."""
+    with pytest.raises(models.ModelError, match="needs pos_weight"):
+        models.build_pipeline(
+            models.REGISTRY["xgboost"], {"n_estimators": 5}, "class_weight", model_config
+        )
+
+
+def test_the_positive_weight_is_the_class_ratio() -> None:
+    labels = np.array([0] * 990 + [1] * 10)
+    assert models.positive_class_weight(labels) == pytest.approx(99.0)
+
+
+def test_the_positive_weight_needs_a_positive_class() -> None:
+    with pytest.raises(models.ModelError, match="no positive rows"):
+        models.positive_class_weight(np.zeros(50, dtype=int))
+
+
+def test_scale_pos_weight_is_not_set_for_the_other_strategies(model_config) -> None:
+    for strategy in ("none", "smote"):
+        pipeline = models.build_pipeline(
+            models.REGISTRY["xgboost"],
+            {"n_estimators": 5},
+            strategy,
+            model_config,
+            pos_weight=99.0,
+        )
+        params = pipeline.named_steps["model"].get_params()
+        assert params.get("scale_pos_weight") in (None, 1, 1.0), strategy
+
+
+def test_a_planned_model_is_skipped_rather_than_failing(model_config, monkeypatch) -> None:
+    """The mechanism that let this sweep grow one branch at a time.
+
+    Nothing is planned any more, so the behaviour is tested with a name that is configured and
+    deliberately not implemented. It is kept because it is how the next model gets added
+    without restructuring the sweep, and because being skipped with a message naming the branch
+    is very different from crashing on a name nobody recognises.
+    """
+    spec_type = type(model_config.models["xgboost"])
+    monkeypatch.setitem(model_config.models, "future_model", spec_type(enabled=True))
+    monkeypatch.setitem(models.PLANNED, "future_model", "feature/some-later-branch")
+
     available = models.available_models(model_config)
 
-    for planned in ("xgboost", "lightgbm", "neural_net"):
-        assert planned in model_config.enabled_models()
-        assert planned not in available
+    assert "future_model" in model_config.enabled_models()
+    assert "future_model" not in available
+    # Everything already implemented still comes through.
+    assert "xgboost" in available
+
+
+def test_an_implemented_model_wins_over_a_stale_planned_entry(model_config, monkeypatch) -> None:
+    """Forgetting to clear a PLANNED entry must not silently drop a working model."""
+    monkeypatch.setitem(models.PLANNED, "xgboost", "feature/already-done")
+
+    assert "xgboost" in models.available_models(model_config)
 
 
 def test_an_unknown_model_in_the_config_is_an_error(config_path) -> None:
@@ -201,11 +313,16 @@ def test_smote_actually_balances_the_training_data(model_config) -> None:
 def test_every_pipeline_fits_and_predicts(model_config) -> None:
     """A smoke test across the whole grid, so an assembly mistake cannot hide."""
     x, y = _imbalanced_data()
-    small = {"logistic_regression": {"max_iter": 200}, "random_forest": {"n_estimators": 10}}
 
     for name, definition in models.REGISTRY.items():
         for strategy in models.IMBALANCE_STRATEGIES:
-            pipeline = models.build_pipeline(definition, small[name], strategy, model_config)
+            pipeline = models.build_pipeline(
+                definition,
+                _tiny_params(name),
+                strategy,
+                model_config,
+                pos_weight=models.positive_class_weight(y),
+            )
             pipeline.fit(x, y)
             probabilities = pipeline.predict_proba(x)[:, 1]
 

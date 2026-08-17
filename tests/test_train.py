@@ -160,12 +160,26 @@ def test_the_sweep_covers_every_combination(report, trained_config) -> None:
     assert len(report.results) == expected
 
 
-def test_every_axis_of_the_sweep_appears(report) -> None:
+def test_every_axis_of_the_sweep_appears(report, trained_config) -> None:
+    """Derived from the registry rather than listed, so adding a model does not break it."""
+    from fraud_pipeline import models
+
     frame = report.to_frame()
 
-    assert set(frame["model"]) == {"logistic_regression", "random_forest"}
-    assert set(frame["imbalance"]) == {"none", "class_weight", "smote"}
+    assert set(frame["model"]) == set(models.available_models(trained_config))
+    assert set(frame["imbalance"]) == set(trained_config.imbalance.strategies)
     assert set(frame["feature_set"]) == {"all", "selected"}
+
+
+def test_the_sweep_now_covers_five_models(report) -> None:
+    """The advanced models are in the comparison, not merely importable."""
+    assert set(report.to_frame()["model"]) == {
+        "logistic_regression",
+        "random_forest",
+        "xgboost",
+        "lightgbm",
+        "neural_net",
+    }
 
 
 def test_feature_sets_of_different_sizes_are_used(report) -> None:
@@ -174,6 +188,102 @@ def test_feature_sets_of_different_sizes_are_used(report) -> None:
     widths = frame.groupby("feature_set")["n_features"].first()
 
     assert widths["all"] > widths["selected"]
+
+
+def _fake_run(
+    name: str, ap: float, low: float, high: float, distinct: int = 900, warning: str = ""
+):
+    """A RunResult with only the fields the reporting logic reads."""
+    return train.RunResult(
+        model=name,
+        label=name,
+        imbalance="none",
+        feature_set="all",
+        feature_set_aliases="",
+        n_features=10,
+        average_precision=ap,
+        ap_low=low,
+        ap_high=high,
+        roc_auc=0.9,
+        brier_score=0.001,
+        precision_at_50_recall=0.5,
+        precision_at_80_recall=0.4,
+        train_average_precision=ap,
+        fit_seconds=1.0,
+        eval_rows=1000,
+        eval_positives=20,
+        run_name=name,
+        distinct_scores=distinct,
+        warning=warning,
+    )
+
+
+def test_a_collapsed_run_cannot_win_the_comparison() -> None:
+    """A model that stopped splitting must not top the table on an artifact.
+
+    This is what happened: LightGBM with no imbalance handling emitted 110 distinct scores
+    across 42,558 rows. Its metrics were not a measurement of anything.
+    """
+    report = train.TrainingReport(
+        results=[
+            _fake_run("collapsed", 0.99, 0.9, 1.0, distinct=3, warning="only 3 distinct scores"),
+            _fake_run("healthy", 0.80, 0.7, 0.9),
+        ]
+    )
+
+    assert report.best().model == "healthy"
+    assert [r.model for r in report.degenerate()] == ["collapsed"]
+
+
+def test_a_collapsed_run_is_left_out_of_the_tied_list() -> None:
+    report = train.TrainingReport(
+        results=[
+            _fake_run("healthy", 0.80, 0.70, 0.90),
+            _fake_run("also_fine", 0.78, 0.68, 0.88),
+            _fake_run("collapsed", 0.79, 0.69, 0.89, distinct=2, warning="collapsed"),
+        ]
+    )
+
+    tied = [r.model for r in report.indistinguishable_from_best()]
+
+    assert "also_fine" in tied
+    assert "collapsed" not in tied
+
+
+def test_when_everything_collapsed_the_best_is_still_reported() -> None:
+    """Returning nothing would hide the fact that the whole sweep failed."""
+    report = train.TrainingReport(
+        results=[
+            _fake_run("a", 0.30, 0.2, 0.4, distinct=2, warning="collapsed"),
+            _fake_run("b", 0.40, 0.3, 0.5, distinct=3, warning="collapsed"),
+        ]
+    )
+
+    assert report.best().model == "b"
+
+
+def test_a_healthy_run_carries_no_warning(report) -> None:
+    for run in report.results:
+        if not run.looks_degenerate:
+            assert run.warning == ""
+            assert run.distinct_scores > 0
+
+
+def test_the_collapse_threshold_is_configurable(config_tree) -> None:
+    config_tree["training"]["min_distinct_scores"] = 5
+    assert Config.model_validate(config_tree).training.min_distinct_scores == 5
+
+
+def _only_model(keep: str | None) -> list[str]:
+    """Overrides that disable every model except one, or all of them when keep is None.
+
+    Written against the registry rather than listed by hand. Naming two models here was what
+    broke three tests when the sweep grew from two to five, and it would break them again on
+    the next one.
+    """
+    from fraud_pipeline import models
+
+    return [f"models.{name}.enabled=false" for name in models.REGISTRY if name != keep]
 
 
 def _write_selection_payload(config: Config, sets: dict[str, list[str]]) -> None:
@@ -237,7 +347,7 @@ def test_merged_sets_are_recorded_on_the_run(trained_config, tmp_path) -> None:
             "training.bootstrap_samples=20",
             "training.save_models=false",
             "models.logistic_regression.max_iter=150",
-            "models.random_forest.enabled=false",
+            *_only_model("logistic_regression"),
             "registry.enabled=false",
         ],
     )
@@ -246,7 +356,7 @@ def test_merged_sets_are_recorded_on_the_run(trained_config, tmp_path) -> None:
     )
     result = train.run(config)
 
-    # One feature set actually trained, so three runs rather than six.
+    # One model, three strategies, and one feature set after merging.
     assert len(result.results) == 3
     for run in result.results:
         assert run.feature_set == "all"
@@ -505,11 +615,7 @@ def test_training_fails_clearly_when_no_model_is_available(trained_config, tmp_p
     config = _config_sharing_data(
         trained_config,
         tmp_path,
-        [
-            "models.logistic_regression.enabled=false",
-            "models.random_forest.enabled=false",
-            "registry.enabled=false",
-        ],
+        [*_only_model(None), "registry.enabled=false"],
     )
     with pytest.raises(TrainingError, match="no models"):
         train.run(config)

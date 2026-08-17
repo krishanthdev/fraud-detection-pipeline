@@ -4,9 +4,9 @@ An end to end credit card fraud detection system. It goes from a raw transaction
 trained and registered model, a scoring API, and a dashboard that explains why a
 transaction was flagged. Everything runs from the command line and inside Docker.
 
-> **Status: in progress.** Stages 1 to 4 run on the real data, with baseline models trained
-> and compared. Stages 5 to 8 are being added one branch at a time. See the branch plan in
-> [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Status: in progress.** Stages 1 to 4 run on the real data, with all five models trained
+> and compared across 30 fits. Stages 5 to 8 are being added one branch at a time. See the
+> branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The problem
 
@@ -47,7 +47,7 @@ exploring only.
 | 2. Validate | `make validate` | Quality rules and the split. Stops the run if the data is wrong | done |
 | . EDA | `make eda` | Measure every feature, then select automatically from what it finds | done |
 | 3. Features | `make features` | Build features, then reselect over the engineered set | done |
-| 4. Train | `make train` | Sweep models, imbalance strategies and feature sets | baselines done |
+| 4. Train | `make train` | Sweep models, imbalance strategies and feature sets | done |
 | 5. Evaluate | `make evaluate` | Metrics, threshold tuning, SHAP, results table | |
 | 6. Register | `make register` | Log to MLflow and promote a champion model | |
 | 7. Serve | `make serve` and `make app` | FastAPI endpoint and Streamlit dashboard | |
@@ -249,89 +249,118 @@ awkward validation set would be the wrong trade. It does mean the validation sco
 understate how much these features are worth, and it is a reason to treat the eventual
 train to validation gap with some suspicion rather than as pure overfitting.
 
-## Baseline results
+## Model results
 
-Logistic regression and random forest, each under three imbalance strategies and two feature
-sets. XGBoost, LightGBM and the neural net arrive on `feature/advanced-models`.
+Five models, three imbalance strategies, two feature sets. 30 fits.
 
 **These are validation numbers. The test split has not been opened.** Once a held out set has
-been used to choose between twelve candidates it is no longer held out, so stage 5 opens it
-once, after the threshold is fixed. Full output in
+been used to choose between 30 candidates it is no longer held out, so stage 5 opens it once,
+after the threshold is fixed. Full output in
 [reports/tables/baseline_results.md](reports/tables/baseline_results.md).
 
-| Model | Imbalance | Features | PR AUC | 95% interval | ROC AUC | P@80% recall | Brier | Fit |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Random Forest | SMOTE | 44 | 0.8725 | [0.786, 0.955] | 0.9852 | 0.882 | 0.00073 | 116s |
-| Random Forest | class weights | 36 | 0.8671 | [0.775, 0.951] | 0.9822 | **0.957** | 0.00045 | 78s |
-| Random Forest | SMOTE | 36 | 0.8669 | [0.778, 0.952] | 0.9833 | 0.882 | 0.00072 | 115s |
-| Random Forest | class weights | 44 | 0.8592 | [0.769, 0.943] | 0.9801 | 0.865 | 0.00046 | 80s |
-| Random Forest | none | 36 | 0.8586 | [0.769, 0.948] | 0.9812 | 0.849 | 0.00038 | 104s |
-| Random Forest | none | 44 | 0.8546 | [0.761, 0.945] | 0.9833 | 0.833 | 0.00039 | 103s |
-| Logistic Regression | class weights | 44 | 0.8395 | [0.741, 0.922] | 0.9838 | 0.638 | 0.04777 | 5s |
-| Logistic Regression | class weights | 36 | 0.8267 | [0.724, 0.914] | 0.9834 | 0.620 | 0.04498 | 3s |
-| Logistic Regression | SMOTE | 44 | 0.8019 | [0.694, 0.891] | 0.9743 | 0.789 | 0.00441 | 6s |
-| Logistic Regression | SMOTE | 36 | 0.7928 | [0.684, 0.882] | 0.9768 | 0.776 | 0.00415 | 2s |
-| Logistic Regression | none | 44 | 0.7817 | [0.678, 0.879] | 0.9813 | 0.772 | 0.00053 | 4s |
-| Logistic Regression | none | 36 | 0.7535 | [0.642, 0.858] | 0.9776 | 0.714 | 0.00058 | 3s |
+The top of the table, plus the best run for each model:
+
+| Model | Imbalance | Features | PR AUC | 95% interval | P@80% recall | Brier | Fit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Random Forest | SMOTE | 44 | 0.8725 | [0.786, 0.955] | 0.882 | 0.00073 | 118s |
+| Random Forest | class weights | 36 | 0.8671 | [0.775, 0.951] | **0.957** | 0.00045 | 71s |
+| **LightGBM** | SMOTE | 44 | 0.8658 | [0.775, 0.950] | 0.936 | 0.00032 | **5.6s** |
+| LightGBM | class weights | 36 | 0.8636 | [0.770, 0.948] | 0.836 | 0.00031 | 4.5s |
+| XGBoost | SMOTE | 44 | 0.8625 | [0.774, 0.946] | 0.936 | 0.00035 | 7.2s |
+| XGBoost | none | 44 | 0.8616 | [0.771, 0.943] | 0.846 | 0.00031 | 5.9s |
+| Neural Net | none | 36 | 0.8532 | [0.760, 0.934] | 0.830 | 0.00037 | 12s |
+| Neural Net | SMOTE | 36 | 0.8133 | [0.707, 0.908] | **0.957** | 0.00037 | 18s |
+| Logistic Regression | class weights | 44 | 0.8395 | [0.741, 0.922] | 0.638 | 0.04777 | 4.6s |
+| LightGBM | none | 44 | 0.3266 | [0.192, 0.457] | 0.001 | 0.00120 | 4.4s |
 
 ### The most important number here is the interval
 
-**All 12 runs are statistically indistinguishable.** Every interval overlaps the best run's.
-With 55 fraud cases in validation, this data cannot rank these models, and the gap from
-0.8725 down to 0.7535 is within the noise.
+**All 28 healthy runs are statistically indistinguishable.** Every interval overlaps the best
+run's. With 55 fraud cases in validation, this data cannot rank these models, and the spread
+from 0.8725 down to 0.7535 is inside the noise.
 
 Without the interval, that table reads as a clean ranking and every gap in it looks like a
 finding. This is what the bootstrap was added for, and it is worth more than the winner's
 name.
 
-### What can be said
+### LightGBM is the model to ship
 
-Averaging over the other axes is crude but it is the right first read.
+Random forest has the highest PR AUC. LightGBM matches it within noise and costs a twentieth
+as much:
+
+| | Random Forest, SMOTE, 44 | LightGBM, SMOTE, 44 |
+| --- | --- | --- |
+| PR AUC | 0.8725 | 0.8658 |
+| Precision at 80 percent recall | 0.882 | **0.936** |
+| Brier score | 0.00073 | **0.00032** |
+| Fit time | 118s | **5.6s** |
+
+Statistically identical ranking, better at the operating point, twice as well calibrated, and
+**21 times faster to fit**. For a model that will be retrained regularly, that is not a minor
+convenience.
+
+XGBoost is the most consistent of the five, scoring between 0.855 and 0.862 across all six of
+its configurations, with the best calibration in the table.
+
+### LightGBM is also the only model that needs imbalance handling
+
+With no imbalance handling at all, LightGBM **collapses**: it scores 0.33 and emits 13
+distinct scores across 42,558 rows. The trees stop splitting, because leaf wise growth with a
+minimum of 20 rows per leaf cannot isolate 366 positives among 198,608.
+
+Random forest without any imbalance handling still reaches 0.855. So "does this model need
+help with the imbalance" has a different answer per model, and for LightGBM it is not
+optional.
+
+Those two runs are flagged and excluded from the comparison rather than deleted. A collapsed
+model still returns valid probabilities and a plausible looking ROC AUC of 0.78, so the
+pipeline now records how many distinct scores each model emits and refuses to let a collapsed
+one win the sweep. Every standard metric on those runs was in range.
+
+### Class weighting wrecks calibration, across model families
+
+| Model | Brier, unweighted | Brier, class weights |
+| --- | --- | --- |
+| Logistic Regression | 0.00053 | **0.04777** |
+| Neural Net | 0.00034 | **0.03873** |
+| Random Forest | 0.00039 | 0.00046 |
+| XGBoost | 0.00031 | 0.00033 |
+| LightGBM | n/a (collapsed) | 0.00031 |
+
+Weighting the rare class improves ranking for the two gradient based models and makes their
+probabilities roughly 90 and 110 times worse calibrated. The tree ensembles are untouched.
+
+It ranks well and the probabilities are fiction. For a system whose output is a fraud score
+in a dashboard rather than a yes or no, that matters, and it is completely invisible if you
+only report ranking metrics.
+
+### What else can be said
 
 | Model | Mean PR AUC | | Imbalance | Mean PR AUC | | Features | Mean PR AUC |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Random Forest | 0.863 | | class weights | 0.849 | | 44 | 0.835 |
-| Logistic Regression | 0.802 | | SMOTE | 0.835 | | 36 | 0.828 |
-| | | | none | 0.814 | | | |
+| XGBoost | 0.860 | | SMOTE | 0.840 | | 44 | 0.826 |
+| Random Forest | 0.863 | | class weights | 0.846 | | 36 | 0.828 |
+| LightGBM | 0.727 | | none | 0.727 | | | |
+| Neural Net | 0.836 | | | | | | |
+| Logistic Regression | 0.802 | | | | | | |
 
-Random forest is ahead of logistic regression everywhere. Imbalance handling helps, and
-neither strategy transforms the problem, which is worth knowing before spending a week
-tuning SMOTE.
+LightGBM's mean is dragged down by its two collapsed runs, which is exactly why a mean is a
+poor summary and the full table is worth reading.
 
-**Feature selection is roughly neutral.** 44 features average 0.835 and 36 average 0.828, a
-gap well inside the noise. So the case for selection here is inference cost, fit time and
+**Feature selection is roughly neutral.** 44 features average 0.826 and 36 average 0.828, a
+gap well inside the noise. The case for selection here is inference cost, fit time and
 interpretability, not accuracy, and it would be dishonest to present it as a scoring win.
 That was an open question when the selection system was built, and this is the answer.
 
-### Class weighting wrecks calibration
-
-Logistic regression with class weights has the best PR AUC of any linear model and a Brier
-score of **0.0478, against 0.00053 unweighted**. That is around 90 times worse calibrated.
-
-It ranks well and its probabilities are fiction. For a system whose output is a fraud score
-rather than a yes or no, that matters, and it is invisible if you only look at ranking
-metrics. Random forest with class weights does not have this problem (0.00046).
-
 ### The primary metric picks a different winner than the operating point does
 
-Best PR AUC is random forest with SMOTE on 44 features. But look at precision at 80 percent
-recall, which is much closer to how the system would actually be run:
+Best PR AUC is random forest with SMOTE. But precision at 80 percent recall is much closer to
+how the system would actually run, and two different models tie for best on it at 0.957:
+random forest with class weights on 36 features, and the neural net with SMOTE on 36.
 
-| | Best PR AUC | Best at the operating point |
-| --- | --- | --- |
-| | RF, SMOTE, 44 features | RF, class weights, 36 features |
-| PR AUC | **0.8725** | 0.8671 |
-| Precision at 80 percent recall | 0.882 | **0.957** |
-| Brier score | 0.00073 | **0.00045** |
-| Features | 44 | **36** |
-| Fit time | 116s | **78s** |
-
-PR AUC integrates over every threshold, including ones nobody would ever run at. At the
-threshold a cost model would actually choose, the second model catches the same fraud with
-roughly a third of the false alarms, is better calibrated, and is cheaper to fit and serve.
-
-This is why stage 5 picks the champion against the cost model rather than against the
-headline metric.
+PR AUC integrates over every threshold, including ones nobody would ever operate at. This is
+why stage 5 picks the champion against the cost model rather than against the headline
+metric.
 
 ## Quick start
 

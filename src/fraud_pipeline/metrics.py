@@ -69,6 +69,13 @@ class Scores:
     #: whether a model is usable at all, without committing to a threshold.
     precision_at_50_recall: float
     precision_at_80_recall: float
+    #: How many different values the model actually emitted.
+    #:
+    #: Not a quality metric, a health check. A tree ensemble that has stopped splitting still
+    #: returns valid probabilities and still produces a plausible looking AUC, but it emits
+    #: only a handful of distinct values, so most rows are tied and the ranking is arbitrary.
+    #: Nothing else here reveals that. See the build log for the run where it mattered.
+    distinct_scores: int
 
     def as_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -132,6 +139,9 @@ def score(y_true: np.ndarray, y_score: np.ndarray) -> Scores:
         rows=int(len(y_true)),
         precision_at_50_recall=precision_at_recall(y_true, y_score, 0.50),
         precision_at_80_recall=precision_at_recall(y_true, y_score, 0.80),
+        # Rounded, because floating point noise in the last digits would count two
+        # indistinguishable scores as different and hide exactly the collapse this detects.
+        distinct_scores=int(np.unique(np.round(y_score, 9)).size),
     )
 
 

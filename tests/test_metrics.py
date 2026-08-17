@@ -56,6 +56,33 @@ def test_a_useless_ranking_scores_like_chance() -> None:
     assert result.average_precision < base_rate * 4
 
 
+def test_distinct_scores_counts_what_the_model_actually_emitted() -> None:
+    """The health check that caught a collapsed LightGBM run.
+
+    A model that has stopped splitting still returns valid probabilities and still produces a
+    plausible ROC AUC. The only thing that gives it away is how few different values it emits.
+    """
+    labels = np.array([0, 0, 0, 0, 1, 1])
+
+    varied = metrics.score(labels, np.array([0.1, 0.2, 0.3, 0.4, 0.8, 0.9]))
+    collapsed = metrics.score(labels, np.array([0.1, 0.1, 0.1, 0.1, 0.9, 0.9]))
+
+    assert varied.distinct_scores == 6
+    assert collapsed.distinct_scores == 2
+
+
+def test_distinct_scores_ignores_floating_point_dust() -> None:
+    """Two scores differing in the fifteenth decimal are the same score.
+
+    Without rounding, a collapsed model would report as many distinct scores as it has rows
+    and the check would never fire.
+    """
+    labels = np.array([0, 0, 0, 1])
+    almost_identical = np.array([0.5, 0.5 + 1e-15, 0.5 - 1e-15, 0.9])
+
+    assert metrics.score(labels, almost_identical).distinct_scores == 2
+
+
 def test_scoring_rejects_scores_that_are_not_probabilities() -> None:
     """A decision function passed in by mistake would silently corrupt the Brier score."""
     y = np.array([0, 0, 1, 1])
