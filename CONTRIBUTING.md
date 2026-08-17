@@ -82,6 +82,39 @@ pytest
 
 On Windows, `.\tasks.ps1 lint` and `.\tasks.ps1 test` do the same thing.
 
+## Notebooks keep their outputs
+
+Most repositories strip notebook outputs with `nbstripout`, and this one deliberately does not.
+It is a portfolio repository, so the notebook is something a reader opens on GitHub and reads
+in ten seconds. Stripped, it renders as a page of empty cells.
+
+The usual objection does not apply. The seven figures come to about 540 KB embedded, the
+outputs are otherwise text tables, and the diffs stay readable.
+
+**The tradeoff is staleness.** Outputs can drift from the code that produced them, so re-run a
+notebook before committing a change to it:
+
+```bash
+python -m nbconvert --to notebook --execute --inplace \
+  --ExecutePreprocessor.kernel_name=fraud-pipeline \
+  --ExecutePreprocessor.timeout=1800 notebooks/01_eda.ipynb
+```
+
+Two details that cost time the first time round:
+
+- Register the venv's kernel once, or the notebook runs against whatever Python owns the
+  `python3` kernelspec and fails on the first import:
+  ```bash
+  python -m ipykernel install --sys-prefix --name fraud-pipeline
+  ```
+- Call `python -m nbconvert`, not `python -m jupyter nbconvert`. The `jupyter` command finds
+  subcommands by searching PATH for a `jupyter-nbconvert` executable, which can be a different
+  Python entirely.
+
+Executing the notebook is also a real check: `--execute` fails on any cell that raises, so a
+notebook that has drifted out of step with the modules cannot be committed looking fine. CI
+cannot do this, because the dataset is not in the repository.
+
 ## Code style
 
 Ruff handles both linting and formatting. The line length is 100. Import sorting, pyupgrade
