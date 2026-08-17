@@ -77,6 +77,37 @@ def _random_forest(params: dict[str, Any], seed: int):
     return RandomForestClassifier(random_state=seed, **params)
 
 
+def _xgboost(params: dict[str, Any], seed: int):
+    from xgboost import XGBClassifier
+
+    return XGBClassifier(
+        random_state=seed,
+        # Without this the classifier prints a deprecation banner on every one of the six
+        # fits, which buries the pipeline's own logging.
+        eval_metric="logloss",
+        n_jobs=-1,
+        **params,
+    )
+
+
+def _lightgbm(params: dict[str, Any], seed: int):
+    from lightgbm import LGBMClassifier
+
+    return LGBMClassifier(
+        random_state=seed,
+        # LightGBM is chatty by default and says nothing useful during a sweep.
+        verbose=-1,
+        n_jobs=-1,
+        **params,
+    )
+
+
+def _neural_net(params: dict[str, Any], seed: int):
+    from fraud_pipeline.neural import TorchMLPClassifier
+
+    return TorchMLPClassifier(random_state=seed, **params)
+
+
 #: Every model this stage knows how to build. Models in the config that are absent from here
 #: are skipped with a message naming the branch they arrive on, the same way an
 #: unimplemented pipeline stage behaves.
@@ -97,14 +128,41 @@ REGISTRY: dict[str, ModelDefinition] = {
         # A tree splits on order, so the scale of a column changes nothing.
         needs_scaling=False,
     ),
+    "xgboost": ModelDefinition(
+        name="xgboost",
+        label="XGBoost",
+        build=_xgboost,
+        needs_scaling=False,
+        # The one model that does not take scikit learn's class_weight keyword. It expects a
+        # single number saying how much more a positive counts, which has to be computed from
+        # the training labels, so the training loop passes it in.
+        weighting="scale_pos_weight",
+    ),
+    "lightgbm": ModelDefinition(
+        name="lightgbm",
+        label="LightGBM",
+        build=_lightgbm,
+        needs_scaling=False,
+        # LightGBM's scikit learn wrapper does take class_weight, unlike XGBoost's.
+        weighting="class_weight",
+    ),
+    "neural_net": ModelDefinition(
+        name="neural_net",
+        label="Neural Net",
+        build=_neural_net,
+        # The only model here that genuinely breaks without scaling. Gradient descent on
+        # columns spanning six orders of magnitude spends every step on the largest one.
+        needs_scaling=True,
+        # The wrapper accepts class_weight="balanced" and turns it into a positive class
+        # weight in the loss, so it looks the same as the others from out here.
+        weighting="class_weight",
+    ),
 }
 
 #: Which branch fills in each model that is configured but not yet implemented.
-PLANNED: dict[str, str] = {
-    "xgboost": "feature/advanced-models",
-    "lightgbm": "feature/advanced-models",
-    "neural_net": "feature/advanced-models",
-}
+#: Empty now that the advanced models have landed. Kept because the mechanism is how a model
+#: gets added without the sweep having to be restructured around it.
+PLANNED: dict[str, str] = {}
 
 
 def available_models(config: Config) -> dict[str, ModelDefinition]:
@@ -120,17 +178,40 @@ def available_models(config: Config) -> dict[str, ModelDefinition]:
     return available
 
 
+def positive_class_weight(y) -> float:
+    """How many times more common the negative class is.
+
+    This is what ``class_weight="balanced"`` amounts to for a two class problem, written out
+    because XGBoost wants the number rather than the keyword. On this data it is around 540.
+    """
+    import numpy as np
+
+    labels = np.asarray(y).ravel()
+    positives = float((labels == 1).sum())
+    negatives = float((labels == 0).sum())
+
+    if positives == 0:
+        raise ModelError("cannot weight the positive class when there are no positive rows")
+    return negatives / positives
+
+
 def build_pipeline(
     definition: ModelDefinition,
     params: dict[str, Any],
     strategy: str,
     config: Config,
+    pos_weight: float | None = None,
 ):
     """Assemble the full estimator for one model and one imbalance strategy.
 
     The result is always a pipeline, even when it has a single step, so that every model is
     fitted and called the same way and nothing downstream has to remember which ones needed
     a scaler.
+
+    Args:
+        pos_weight: how much more a positive counts, needed only by models whose weighting is
+            ``scale_pos_weight``. It depends on the training labels, so the caller computes it
+            rather than this function guessing.
     """
     if strategy not in IMBALANCE_STRATEGIES:
         raise ModelError(
@@ -142,8 +223,16 @@ def build_pipeline(
     seed = config.project.seed
     estimator_params = dict(params)
 
-    if strategy == "class_weight" and definition.weighting == "class_weight":
-        estimator_params["class_weight"] = "balanced"
+    if strategy == "class_weight":
+        if definition.weighting == "class_weight":
+            estimator_params["class_weight"] = "balanced"
+        elif definition.weighting == "scale_pos_weight":
+            if pos_weight is None:
+                raise ModelError(
+                    f"{definition.name} needs pos_weight to use the class_weight strategy, "
+                    f"because it has no class_weight keyword of its own"
+                )
+            estimator_params["scale_pos_weight"] = pos_weight
 
     steps = []
     if definition.needs_scaling:
