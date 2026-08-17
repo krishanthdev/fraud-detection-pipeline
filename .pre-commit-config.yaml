@@ -22,7 +22,16 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.8.1
-    hooks:
-      - id: nbstripout
+# nbstripout is deliberately absent.
+#
+# It was here, and it was wrong for this repository. Stripping notebook outputs is the right
+# default on a shared engineering repo, where outputs bloat the history and make diffs
+# unreadable. This is a portfolio repo, where the notebook is something a reader opens on
+# GitHub and reads in ten seconds. Stripped, it renders as a page of empty cells.
+#
+# The usual cost does not apply here either. The figures are written to reports/figures and
+# the notebook prints their paths, so nothing large is embedded. The outputs are text tables,
+# the file is around 30 KB, and the diffs stay readable.
+#
+# The tradeoff taken instead: outputs can go stale. Re-run the notebook before committing a
+# change to it. See CONTRIBUTING.md.
