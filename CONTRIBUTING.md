@@ -66,7 +66,8 @@ The project is sliced into one pull request per branch, in this order.
 | 4 | `feature/feature-engineering` | Stage 3 |
 | 5 | `feature/baseline-models` | Stage 4, logistic regression and random forest |
 | 6 | `feature/advanced-models` | Stage 4, XGBoost, LightGBM, neural net |
-| 7 | `feature/evaluation-and-results-table` | Stages 5 and 6 |
+| 7 | `feature/evaluation-and-results-table` | Stage 5, the cost tuned threshold and the one look at test |
+| 7b | `feature/explain-and-register` | SHAP explanations and stage 6, MLflow promotion |
 | 8 | `feature/serving-api` | Stage 7, FastAPI |
 | 9 | `feature/web-app` | Stage 7, Streamlit dashboard |
 | 10 | `feature/dockerize` | Stage 8 |

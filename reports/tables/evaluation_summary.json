@@ -1,0 +1,53 @@
+{
+  "champion": {
+    "run_name": "neural_net__smote__selected",
+    "label": "Neural Net",
+    "imbalance": "smote",
+    "feature_set": "selected",
+    "considered": 28,
+    "runner_up": "xgboost__smote__all",
+    "margin": 5.0
+  },
+  "cost_model": {
+    "model": "amount",
+    "false_negative_cost": 120.0,
+    "false_positive_cost": 5.0
+  },
+  "threshold": 0.9197342991828918,
+  "threshold_strategy": "cost",
+  "validation": {
+    "threshold": 0.9197342991828918,
+    "strategy": "cost",
+    "cost": 176.3,
+    "true_positives": 44,
+    "false_positives": 2,
+    "false_negatives": 11,
+    "true_negatives": 42501,
+    "precision": 0.9565217391304348,
+    "recall": 0.8,
+    "f1": 0.8712871287128713,
+    "value_caught": 8229.810000000001,
+    "value_missed": 166.3,
+    "rows": 42558,
+    "value_recall": 0.9801932085215654,
+    "alerts": 46
+  },
+  "test": {
+    "threshold": 0.9197342991828918,
+    "strategy": "frozen",
+    "cost": 3007.68,
+    "true_positives": 33,
+    "false_positives": 3,
+    "false_negatives": 19,
+    "true_negatives": 42505,
+    "precision": 0.9166666666666666,
+    "recall": 0.6346153846153846,
+    "f1": 0.75,
+    "value_caught": 3176.2,
+    "value_missed": 2992.68,
+    "rows": 42560,
+    "value_recall": 0.5148746612026819,
+    "alerts": 36
+  },
+  "recall_gap": -0.16538461538461546
+}

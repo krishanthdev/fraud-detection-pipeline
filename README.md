@@ -4,9 +4,9 @@ An end to end credit card fraud detection system. It goes from a raw transaction
 trained and registered model, a scoring API, and a dashboard that explains why a
 transaction was flagged. Everything runs from the command line and inside Docker.
 
-> **Status: in progress.** Stages 1 to 4 run on the real data, with all five models trained
-> and compared across 30 fits. Stages 5 to 8 are being added one branch at a time. See the
-> branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Status: in progress.** Stages 1 to 5 run on the real data. A champion is chosen against
+> a cost model and scored once on the held out test split. Stages 6 to 8 are being added one
+> branch at a time. See the branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The problem
 
@@ -48,7 +48,7 @@ exploring only.
 | . EDA | `make eda` | Measure every feature, then select automatically from what it finds | done |
 | 3. Features | `make features` | Build features, then reselect over the engineered set | done |
 | 4. Train | `make train` | Sweep models, imbalance strategies and feature sets | done |
-| 5. Evaluate | `make evaluate` | Metrics, threshold tuning, SHAP, results table | |
+| 5. Evaluate | `make evaluate` | Tune the threshold, then open test once | done |
 | 6. Register | `make register` | Log to MLflow and promote a champion model | |
 | 7. Serve | `make serve` and `make app` | FastAPI endpoint and Streamlit dashboard | |
 | 8. Package | `make docker-up` | The whole thing in containers | |
@@ -361,6 +361,76 @@ random forest with class weights on 36 features, and the neural net with SMOTE o
 PR AUC integrates over every threshold, including ones nobody would ever operate at. This is
 why stage 5 picks the champion against the cost model rather than against the headline
 metric.
+
+## Final results, on the held out test split
+
+The test split was opened **once**, after the threshold was frozen on validation. Full output
+in [reports/tables/evaluation.md](reports/tables/evaluation.md).
+
+Champion: **Neural Net**, SMOTE, 36 features, chosen from 28 healthy runs by expected cost at
+a tuned threshold rather than by the headline metric. Threshold 0.9197.
+
+| Measure | Validation | Test |
+| --- | --- | --- |
+| Recall (cases) | 0.800 | **0.635** |
+| Precision | 0.957 | **0.917** |
+| Value recall | 0.980 | **0.515** |
+| Frauds caught | 44 of 55 | 33 of 52 |
+| False alarms | 2 | 3 |
+
+### The most important number is value recall, and it is bad news
+
+Catching 63.5 percent of fraud **cases** and 51.5 percent of fraudulent **money** are
+different results, and only the second is what a fraud team is measured on.
+
+| Split | Frauds missed | Largest missed | Mean missed | Value recall |
+| --- | --- | --- | --- | --- |
+| Validation | 11 | 109 | 15 | 0.980 |
+| Test | 19 | **1,097** | 158 | **0.515** |
+
+On validation the model missed only cheap frauds. On test it missed the expensive ones: the
+five largest misses were worth 1097, 634, 358, 296 and 248, which is 2,633 of the 2,993 lost.
+
+**Validation gave a badly optimistic picture of how much money this model saves.** With about
+fifty fraud cases per split, whether the handful of large ones happen to be caught swings value
+recall enormously, and the validation answer did not repeat. Any claim about money saved has to
+carry that caveat, and this project makes it rather than quoting the 0.980.
+
+### Why the cost model is not a detail
+
+A missed fraud and a false alarm cost different amounts, and neither is a modelling question.
+Two ways to charge a missed fraud:
+
+- **flat**, every miss costs the same. The mean fraudulent amount is 120.29, so 120 is the
+  correct flat number. It is still the wrong summary.
+- **amount**, a miss costs the value of that transaction.
+
+The amounts are severely skewed: median 12.31, mean 120.29, max 2,125.87, with a quarter of
+frauds at or below 1.00 and sixteen at exactly zero. A flat charge treats the largest fraud in
+the file and a 1.00 fraud as equally worth catching.
+
+Where the two disagree, the difference is large:
+
+| Model | Flat | Amount | Fraudulent value recovered |
+| --- | --- | --- | --- |
+| LightGBM, SMOTE | 47 caught, **10 false alarms** | 44 caught, **3 false alarms** | 0.9805 vs 0.9802 |
+| Random Forest, SMOTE | 48 caught, **22 false alarms** | 45 caught, **6 false alarms** | 0.9808 vs 0.9805 |
+
+The amount model gives up about three fraud cases to remove between seven and sixteen false
+alarms, and recovers the same money to three decimal places. Counting frauds and recovering
+money are different objectives.
+
+They do not disagree on every model. On models whose scores are strongly bimodal, including
+the champion, both land on the same threshold, and the report says so rather than implying a
+difference that is not there.
+
+### The false alarm price is a business input, not a measurement
+
+It is the support and churn cost of wrongly blocking a customer, and no amount of transaction
+data can supply it. So it is swept rather than asserted, in
+[reports/tables/threshold_sensitivity.csv](reports/tables/threshold_sensitivity.csv). On this
+champion the chosen threshold is stable from 1 through 50, because its scores are bimodal
+enough that no price in that range moves the decision.
 
 ## Quick start
 

@@ -269,11 +269,42 @@ evaluation:
   # The operating threshold is picked on validation, then applied unchanged to test.
   threshold_strategy: cost            # options: cost, max_f1, fixed_recall
   fixed_recall_target: 0.80
+
+  # Which run gets promoted. "auto" takes the healthy run with the lowest validation cost.
+  # A run name like "lightgbm__smote__all" pins it instead.
+  champion: auto
+  test_split: test
+  report_file: evaluation.md
+  summary_file: evaluation_summary.json
+
   cost:
-    # A missed fraud costs the average fraudulent amount. A false alarm costs the
-    # support and churn expense of blocking a real customer. Both are editable.
+    # How a missed fraud is charged.
+    #
+    #   flat    every missed fraud costs false_negative_cost below
+    #   amount  a missed fraud costs the value of that transaction
+    #
+    # These are different objectives, not different precisions about the same one. Flat
+    # optimises for catching fraud *cases*, amount optimises for recovering *money*, and
+    # the fraudulent amounts here are severely skewed: median 12.31, mean 120.29, max
+    # 2125.87. A quarter of frauds are 1.00 or less and sixteen are exactly zero.
+    #
+    # They do not disagree on every model. Where they do, on LightGBM and random forest
+    # with SMOTE, the amount model gives up about three fraud cases to remove between seven
+    # and sixteen false alarms, and the fraudulent value recovered is unchanged to three
+    # decimal places. On models whose scores are strongly bimodal they pick the same
+    # threshold. See the build log.
+    model: amount
+
+    # Used only when model is flat. Checked against the data: the mean fraudulent amount in
+    # the training split is 120.29, so this is the right flat number. It is still the wrong
+    # summary, which is why amount is the default.
     false_negative_cost: 120.0
+
+    # NOT derivable from this dataset. It is the support and churn expense of wrongly
+    # blocking a customer, which is a business input. The sweep below reports what the
+    # threshold would be across a range instead of pretending this number is measured.
     false_positive_cost: 5.0
+    sensitivity_false_positive_costs: [1.0, 2.0, 5.0, 10.0, 25.0, 50.0]
 
 explainability:
   shap_enabled: true
