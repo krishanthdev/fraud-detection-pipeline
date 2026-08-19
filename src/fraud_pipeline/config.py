@@ -255,8 +255,18 @@ class ModelSpec(BaseModel):
 
 
 class CostConfig(StrictModel):
+    model: str = "amount"
     false_negative_cost: float
     false_positive_cost: float
+    sensitivity_false_positive_costs: list[float] = Field(default_factory=list)
+
+    @field_validator("model")
+    @classmethod
+    def _known_cost_model(cls, value: str) -> str:
+        allowed = {"flat", "amount"}
+        if value not in allowed:
+            raise ValueError(f"cost model must be one of {sorted(allowed)}, got {value!r}")
+        return value
 
 
 class EvaluationConfig(StrictModel):
@@ -265,6 +275,11 @@ class EvaluationConfig(StrictModel):
     threshold_strategy: str
     fixed_recall_target: float
     cost: CostConfig
+    champion: str = "auto"
+    test_split: str = "test"
+    threshold_grid_size: int = 0  # unused, the sweep is exact
+    report_file: str = "evaluation.md"
+    summary_file: str = "evaluation_summary.json"
 
     @field_validator("threshold_strategy")
     @classmethod
@@ -272,6 +287,35 @@ class EvaluationConfig(StrictModel):
         allowed = {"cost", "max_f1", "fixed_recall"}
         if value not in allowed:
             raise ValueError(f"threshold_strategy must be one of {sorted(allowed)}, got {value!r}")
+        return value
+
+    @field_validator("fixed_recall_target")
+    @classmethod
+    def _recall_target_is_reachable(cls, value: float) -> float:
+        """A recall target above 1.0 can never be met, and 0 is not a target.
+
+        Anything at or below 1.0 is always reachable, because flagging every transaction is
+        one of the candidate thresholds. That makes the runtime guard in tune_threshold
+        defensive rather than load bearing, which is worth knowing.
+        """
+        if not 0.0 < value <= 1.0:
+            raise ValueError(f"fixed_recall_target must be above 0 and at most 1, got {value}")
+        return value
+
+    @field_validator("test_split")
+    @classmethod
+    def _final_scoring_uses_test(cls, value: str) -> str:
+        """The mirror image of the guard on training and eda.
+
+        Those two refuse to touch test. This stage exists to open it, so the interesting
+        mistake here is the opposite one: reporting final numbers from validation, which the
+        threshold was already tuned on, and calling them held out.
+        """
+        if value != "test":
+            raise ValueError(
+                f"the evaluation stage reports on the test split, got {value!r}. Reporting "
+                f"final numbers on the split the threshold was tuned on would overstate them."
+            )
         return value
 
 
