@@ -28,12 +28,14 @@ from rich.table import Table
 
 from fraud_pipeline import __version__
 from fraud_pipeline import eda as eda_stage
+from fraud_pipeline import evaluate as evaluate_stage
 from fraud_pipeline import features as features_stage
 from fraud_pipeline import ingest as ingest_stage
 from fraud_pipeline import train as train_stage
 from fraud_pipeline import validation as validation_stage
 from fraud_pipeline.config import Config, load_config
 from fraud_pipeline.eda import EdaError
+from fraud_pipeline.evaluate import EvaluationError
 from fraud_pipeline.feature_selection import SelectionError
 from fraud_pipeline.features import FeatureError
 from fraud_pipeline.ingest import IngestError
@@ -305,11 +307,44 @@ def train(ctx: typer.Context) -> None:
     _do_train(_context(ctx))
 
 
+def _do_evaluate(rc: RunContext) -> None:
+    """Stage 5, shared by the `evaluate` command and by `run-all`."""
+    stage_banner(rc.logger, "5 evaluate", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        result = evaluate_stage.run(rc.config)
+    except (EvaluationError, FeatureError, SelectionError) as error:
+        console.print("[red]Evaluation failed.[/red]" + chr(10) + str(error))
+        raise typer.Exit(code=1) from error
+
+    champion, test = result.champion, result.test
+    table = Table(title="Champion, scored on test at the frozen threshold")
+    table.add_column("", style="cyan")
+    table.add_column("Value", justify="right")
+    table.add_row("run", champion.run_name)
+    table.add_row("threshold", f"{result.threshold:.6f}")
+    table.add_row("recall (cases)", f"{test.recall:.3f}")
+    table.add_row("value recall", f"{test.value_recall:.3f}")
+    table.add_row("precision", f"{test.precision:.3f}")
+    table.add_row(
+        "frauds caught", f"{test.true_positives} of {test.true_positives + test.false_negatives}"
+    )
+    table.add_row("false alarms", str(test.false_positives))
+    table.add_row("value caught", f"{test.value_caught:,.0f}")
+    table.add_row("value missed", f"{test.value_missed:,.0f}")
+    console.print(table)
+
+    console.print(
+        f"[green]Promoted[/green] {champion.label} ({champion.imbalance}, "
+        f"{champion.feature_set}) from {champion.considered} healthy runs."
+    )
+
+
 @app.command()
 def evaluate(ctx: typer.Context) -> None:
-    """Stage 5. Score the models, tune the threshold and write the results table."""
-    _context(ctx)
-    _not_built_yet("evaluate", "feature/evaluation-and-results-table")
+    """Stage 5. Tune the threshold on validation, then open the test split once."""
+    _do_evaluate(_context(ctx))
 
 
 @app.command("register")
