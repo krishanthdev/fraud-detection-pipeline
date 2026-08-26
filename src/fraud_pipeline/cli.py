@@ -29,19 +29,23 @@ from rich.table import Table
 from fraud_pipeline import __version__
 from fraud_pipeline import eda as eda_stage
 from fraud_pipeline import evaluate as evaluate_stage
+from fraud_pipeline import explain as explain_stage
 from fraud_pipeline import features as features_stage
 from fraud_pipeline import ingest as ingest_stage
+from fraud_pipeline import registry as registry_stage
 from fraud_pipeline import train as train_stage
 from fraud_pipeline import validation as validation_stage
 from fraud_pipeline.config import Config, load_config
 from fraud_pipeline.eda import EdaError
 from fraud_pipeline.evaluate import EvaluationError
+from fraud_pipeline.explain import ExplanationError
 from fraud_pipeline.feature_selection import SelectionError
 from fraud_pipeline.features import FeatureError
 from fraud_pipeline.ingest import IngestError
 from fraud_pipeline.logging_utils import setup_logging, stage_banner
 from fraud_pipeline.metrics import MetricError
 from fraud_pipeline.models import ModelError
+from fraud_pipeline.registry import RegistryError
 from fraud_pipeline.seeding import set_global_seed
 from fraud_pipeline.splits import SplitError
 from fraud_pipeline.train import TrainingError
@@ -347,11 +351,58 @@ def evaluate(ctx: typer.Context) -> None:
     _do_evaluate(_context(ctx))
 
 
+def _do_explain(rc: RunContext) -> None:
+    """SHAP explanations for the promoted champion."""
+    stage_banner(rc.logger, "explain", rc.config.dataset.spec().name)
+    set_global_seed(rc.config.project.seed)
+
+    try:
+        result = explain_stage.run(rc.config)
+    except (ExplanationError, FeatureError, SelectionError) as error:
+        console.print("[red]Explanations failed.[/red]" + chr(10) + str(error))
+        raise typer.Exit(code=1) from error
+
+    if result is None:
+        console.print("[yellow]Explanations are switched off in the config.[/yellow]")
+        return
+
+    top = result.top(rc.config.explainability.shap_top_features)
+    table = Table(title=f"What the champion uses ({result.method} explainer)")
+    table.add_column("Feature", style="cyan")
+    table.add_column("Mean |SHAP|", justify="right")
+    table.add_column("Share", justify="right")
+    for row in top.itertuples():
+        table.add_row(row.feature, f"{row.mean_abs_shap:.5f}", f"{row.share:.1%}")
+    console.print(table)
+
+
+def _do_register(rc: RunContext) -> None:
+    """Stage 6, shared by the `register` command and by `run-all`."""
+    stage_banner(rc.logger, "6 register", rc.config.dataset.spec().name)
+
+    try:
+        decision = registry_stage.run(rc.config)
+    except RegistryError as error:
+        console.print("[red]Registration failed.[/red]" + chr(10) + str(error))
+        raise typer.Exit(code=1) from error
+
+    colour = "green" if decision.promoted else "yellow"
+    verdict = "Promoted" if decision.promoted else "Not promoted"
+    console.print(f"[{colour}]{verdict}[/{colour}]: {decision.reason}.")
+    if decision.model_version:
+        console.print(f"Registered as version {decision.model_version}.")
+
+
+@app.command()
+def explain(ctx: typer.Context) -> None:
+    """Explain the promoted champion with SHAP."""
+    _do_explain(_context(ctx))
+
+
 @app.command("register")
 def register_model(ctx: typer.Context) -> None:
-    """Stage 6. Promote the best run to champion in the MLflow model registry."""
-    _context(ctx)
-    _not_built_yet("register", "feature/evaluation-and-results-table")
+    """Stage 6. Promote the champion in the MLflow model registry."""
+    _do_register(_context(ctx))
 
 
 @app.command()
