@@ -695,3 +695,28 @@ def test_the_report_frame_has_one_row_per_run(report) -> None:
     assert isinstance(frame, pd.DataFrame)
     assert len(frame) == len(report.results)
     assert "overfit_gap" not in frame.columns  # a property, not a stored field
+
+
+def test_the_collapse_threshold_scales_with_the_split(trained_config) -> None:
+    """An absolute threshold does not survive a change of scale.
+
+    200 distinct scores is the right bar on 42,558 validation rows. On a few hundred rows a
+    perfectly healthy model cannot reach it, so every run would be reported as collapsed. That
+    happened the first time a small fixture reached this code.
+    """
+    assert train.collapse_threshold(trained_config, 42_558) == 200
+    assert train.collapse_threshold(trained_config, 5_000) == 25
+    assert train.collapse_threshold(trained_config, 750) == 5
+
+
+def test_the_threshold_never_drops_below_the_floor(trained_config) -> None:
+    """Below a handful of rows the share is meaningless and the check should stop firing."""
+    assert train.collapse_threshold(trained_config, 10) == train.COLLAPSE_FLOOR
+    assert train.collapse_threshold(trained_config, 0) == train.COLLAPSE_FLOOR
+
+
+def test_the_configured_absolute_still_caps_it(trained_config) -> None:
+    """On a very large split the absolute binds, not the share."""
+    assert train.collapse_threshold(trained_config, 10_000_000) == (
+        trained_config.training.min_distinct_scores
+    )

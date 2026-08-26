@@ -4,9 +4,10 @@ An end to end credit card fraud detection system. It goes from a raw transaction
 trained and registered model, a scoring API, and a dashboard that explains why a
 transaction was flagged. Everything runs from the command line and inside Docker.
 
-> **Status: in progress.** Stages 1 to 5 run on the real data. A champion is chosen against
-> a cost model and scored once on the held out test split. Stages 6 to 8 are being added one
-> branch at a time. See the branch plan in [CONTRIBUTING.md](CONTRIBUTING.md).
+> **Status: in progress.** Stages 1 to 6 run on the real data. A champion is chosen against
+> a cost model, scored once on the held out test split, explained with SHAP, and registered
+> in MLflow. Serving, the dashboard and Docker remain. See the branch plan in
+> [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The problem
 
@@ -49,7 +50,7 @@ exploring only.
 | 3. Features | `make features` | Build features, then reselect over the engineered set | done |
 | 4. Train | `make train` | Sweep models, imbalance strategies and feature sets | done |
 | 5. Evaluate | `make evaluate` | Tune the threshold, then open test once | done |
-| 6. Register | `make register` | Log to MLflow and promote a champion model | |
+| 6. Register | `make register` | Promote the champion, with a margin | done |
 | 7. Serve | `make serve` and `make app` | FastAPI endpoint and Streamlit dashboard | |
 | 8. Package | `make docker-up` | The whole thing in containers | |
 
@@ -431,6 +432,56 @@ data can supply it. So it is swept rather than asserted, in
 [reports/tables/threshold_sensitivity.csv](reports/tables/threshold_sensitivity.csv). On this
 champion the chosen threshold is stable from 1 through 50, because its scores are bimodal
 enough that no price in that range moves the decision.
+
+## What the model is actually using
+
+`make explain` runs SHAP over the promoted champion. Full output in
+[reports/tables/explanations.md](reports/tables/explanations.md).
+
+![what the champion uses](reports/figures/08_shap_importance.png)
+
+| Feature | Share of total importance |
+| --- | --- |
+| V14 | 28.4 percent |
+| V12 | 14.1 percent |
+| V4 | 8.3 percent |
+| V10 | 6.2 percent |
+
+**This is a cross check, not just a chart.** The exploration stage found V14, V12, V4 and V10
+to be the four most separable features univariately, in that order. SHAP independently ranks
+them V14, V12, V4, V10, in the same order, from a completely different calculation. Two methods
+agreeing is evidence the model is using real signal rather than an artifact.
+
+If the top driver had been something that should not matter, that would be a leak or a bug
+showing up as an explanation, which is the main reason to look.
+
+The report also includes worked examples, deliberately covering a **false alarm** and a
+**missed fraud** alongside a caught one. The failures are what a reviewer learns from.
+
+The explainer is chosen by model type, because the champion is chosen by the pipeline and can
+change between runs. Tree ensembles get the exact `TreeExplainer`; anything else, including the
+neural net currently promoted, gets `KernelExplainer`.
+
+## Promotion
+
+`make register` decides whether the champion takes the title, and records why in
+[reports/tables/registry.md](reports/tables/registry.md).
+
+Two rules:
+
+**Judged on expected cost**, the same basis stage 5 chose the champion with. Judging promotion
+on a different number would let a model win the selection and lose the promotion, which is not
+a difference anyone could explain to the team running it.
+
+**On validation cost, never test.** Promoting on the test number would fold the held out
+estimate back into the decision it is supposed to be independent of.
+
+**A challenger must win by a margin.** Without one, every rerun swaps the model whenever the
+number moves at all, and with 52 fraud cases it moves for no reason. A margin turns *different*
+into *better*.
+
+The registered model carries a signature (36 float inputs, 2 probability outputs), so a served
+model validates its input shape at the door rather than failing somewhere inside the pipeline.
 
 ## Quick start
 

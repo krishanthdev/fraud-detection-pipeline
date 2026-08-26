@@ -323,6 +323,11 @@ class ExplainabilityConfig(StrictModel):
     shap_enabled: bool
     shap_background_samples: int
     shap_top_features: int
+    shap_background_clusters: int = 25
+    shap_explain_samples: int = 300
+    shap_examples: int = 4
+    report_file: str = "explanations.md"
+    figure_file: str = "08_shap_importance.png"
 
 
 class TrainingConfig(StrictModel):
@@ -374,6 +379,17 @@ class RegistryConfig(StrictModel):
     registered_model_name: str
     promotion_metric: str
     promotion_min_improvement: float
+    promotion_basis: str = "cost"
+    model_stage: str = "champion"
+    report_file: str = "registry.md"
+
+    @field_validator("promotion_basis")
+    @classmethod
+    def _known_basis(cls, value: str) -> str:
+        allowed = {"cost", "metric"}
+        if value not in allowed:
+            raise ValueError(f"promotion_basis must be one of {sorted(allowed)}, got {value!r}")
+        return value
 
 
 class ServingConfig(StrictModel):

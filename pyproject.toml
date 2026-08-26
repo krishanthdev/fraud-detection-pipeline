@@ -65,6 +65,9 @@ filterwarnings = [
     # every figure, which buries any warning that does matter. Narrowed to pyparsing's own
     # warning class so nothing else is hidden.
     "ignore::pyparsing.exceptions.PyparsingDeprecationWarning",
+    # shap's colour helpers call a numpy API numpy has deprecated. Third party, nothing to fix
+    # here, and it fires roughly 900 times per explanation run, which buries anything real.
+    "ignore:Converting `np.inexact`:DeprecationWarning",
 ]
 
 [tool.coverage.run]

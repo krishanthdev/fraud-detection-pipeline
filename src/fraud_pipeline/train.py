@@ -42,6 +42,13 @@ from fraud_pipeline.paths import ensure_dir, repo_root
 logger = logging.getLogger(__name__)
 
 
+#: A run emitting fewer distinct scores than this share of the rows it scored has stopped
+#: splitting. Healthy runs on the real split produce between 1.1 and 2.3 percent.
+COLLAPSE_SHARE_OF_ROWS = 0.005
+#: Below this many rows the share is meaningless, so the check effectively stops firing.
+COLLAPSE_FLOOR = 5
+
+
 class TrainingError(RuntimeError):
     """Training cannot run or cannot produce a usable result."""
 
@@ -262,6 +269,24 @@ def _feature_matrix(frame: pd.DataFrame, feature_names: list[str], target: str):
     return frame[feature_names].to_numpy(dtype=float), frame[target].to_numpy(dtype=int)
 
 
+def collapse_threshold(config: Config, rows: int) -> int:
+    """How few distinct scores counts as collapsed, for a split of this size.
+
+    The configured number is an absolute, calibrated on 42,558 validation rows where healthy
+    runs produced between 489 and 971 distinct scores and collapsed ones produced 110 or fewer.
+
+    An absolute does not survive a change of scale. On a few hundred rows a perfectly healthy
+    model cannot produce 200 distinct scores, so every run would be reported as collapsed. That
+    is not hypothetical: it fired the first time a small fixture reached this code.
+
+    So the threshold is also capped as a share of the rows being scored. On the real split the
+    absolute still binds, and on a small one the share does, which is the behaviour that
+    generalises.
+    """
+    proportional = int(rows * COLLAPSE_SHARE_OF_ROWS)
+    return max(COLLAPSE_FLOOR, min(config.training.min_distinct_scores, proportional))
+
+
 def fit_one(
     definition: models.ModelDefinition,
     strategy: str,
@@ -330,7 +355,7 @@ def fit_one(
         distinct_scores=scores.distinct_scores,
     )
 
-    minimum = config.training.min_distinct_scores
+    minimum = collapse_threshold(config, scores.rows)
     if scores.distinct_scores < minimum:
         result.warning = (
             f"only {scores.distinct_scores} distinct scores across {scores.rows:,} rows "
