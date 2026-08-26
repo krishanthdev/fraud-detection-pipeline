@@ -308,8 +308,25 @@ evaluation:
 
 explainability:
   shap_enabled: true
+  # SHAP measures how far a prediction sits from a typical one, so it needs a definition of
+  # typical. These are the reference rows. The explainer evaluates the model once per
+  # background row per perturbation, so this is the setting that decides the runtime.
   shap_background_samples: 200
   shap_top_features: 10
+  # The reference rows are compressed to this many weighted centroids before explaining.
+  # KernelExplainer costs one model evaluation per reference row per perturbation, so this
+  # is the setting that decides whether the stage takes minutes or hours. Measured: 40 rows
+  # against 50 reference rows took 39 seconds, which puts the uncompressed defaults at about
+  # twenty minutes.
+  shap_background_clusters: 25
+  # How many transactions to explain. Kept small because the global picture converges quickly
+  # and the local explanations are only read a few at a time.
+  shap_explain_samples: 300
+  # Worked examples written into the report: flagged frauds, plus false alarms, because the
+  # reason a model was wrong is more useful to read than the reason it was right.
+  shap_examples: 4
+  report_file: explanations.md
+  figure_file: 08_shap_importance.png
 
 registry:
   # MLflow tracking. A local sqlite store by default, so nothing external is needed.
@@ -319,7 +336,15 @@ registry:
   registered_model_name: fraud-detector
   # A challenger is promoted to champion only if it beats the champion by this much.
   promotion_metric: average_precision
+  # A challenger has to beat the champion by this much to take the title. Without a margin,
+  # every rerun swaps the model on noise, and on 52 fraud cases the noise is large.
   promotion_min_improvement: 0.005
+  # What promotion is judged on. "cost" uses the expected cost at the tuned threshold, which
+  # is what stage 5 chose the champion with, so the two agree. "metric" uses promotion_metric
+  # above and is kept because it is what most registries do.
+  promotion_basis: cost
+  model_stage: champion
+  report_file: registry.md
 
 serving:
   api_host: 0.0.0.0
