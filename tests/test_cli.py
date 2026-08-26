@@ -27,12 +27,21 @@ STAGE_COMMANDS = [
 ]
 
 #: Stages that still print which branch they arrive on.
-UNBUILT_COMMANDS = ["register", "serve"]
+UNBUILT_COMMANDS = ["serve"]
 
 #: Stages that are built and would run for real if invoked here. They are exercised by their
 #: own test modules against sandbox paths, never from this file, because invoking them with
 #: the default config points them at the repository's own data and reports.
-BUILT_COMMANDS = ["ingest", "validate", "eda", "features", "train", "evaluate"]
+BUILT_COMMANDS = [
+    "ingest",
+    "validate",
+    "eda",
+    "features",
+    "train",
+    "evaluate",
+    "explain",
+    "register",
+]
 
 
 def test_help_lists_every_stage() -> None:
