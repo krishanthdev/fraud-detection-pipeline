@@ -380,6 +380,47 @@ def plot_stability(stats: pd.DataFrame, config: Config) -> str:
     return _save(fig, "06_stability.png", config)
 
 
+def plot_shap_importance(importance, run_name: str, config: Config) -> str:
+    """What the promoted model leans on, in the order it leans on them.
+
+    Engineered features are coloured differently from the anonymised components, because the
+    question this figure answers for the project is whether the feature engineering earned
+    its place in the model rather than only in a table.
+    """
+    top = importance.head(15).iloc[::-1]
+    colours = [
+        NORMAL_COLOUR if str(name).startswith("V") else ACCENT_COLOUR for name in top["feature"]
+    ]
+
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    ax.barh(top["feature"], top["mean_abs_shap"], color=colours, height=0.72)
+
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=NORMAL_COLOUR),
+        plt.Rectangle((0, 0), 1, 1, color=ACCENT_COLOUR),
+    ]
+    ax.legend(
+        handles,
+        ["anonymised component", "engineered feature"],
+        fontsize=9,
+        loc="lower right",
+        frameon=False,
+    )
+
+    ax.set_xlabel("Mean absolute SHAP value (probability units)")
+    built = sum(1 for name in importance.head(15)["feature"] if not str(name).startswith("V"))
+    ax.set_title(
+        f"What {run_name} actually uses"
+        + chr(10)
+        + f"{built} of the top 15 drivers are features this pipeline built",
+        fontsize=11,
+    )
+    ax.tick_params(axis="y", labelsize=9)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    return _save(fig, config.explainability.figure_file, config)
+
+
 def draw_all(
     analysis: pd.DataFrame,
     drift: pd.DataFrame,
